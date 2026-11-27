@@ -9,13 +9,19 @@ import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Supabase Realtime Phoenix websocket subscription for store/customer data. */
-class StoreRealtime(private val api: Supabase, private val onChange: () -> Unit) {
+class StoreRealtime(private val api: Supabase, private val onChange: (String) -> Unit) {
     private val client = OkHttpClient.Builder().pingInterval(25, TimeUnit.SECONDS).build()
     private var socket: WebSocket? = null
-    private var closed = false
-    private var ref = 0
+    @Volatile private var closed = false
+    private val refs = AtomicInteger(0)
+    private val heartbeat: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+
+    private fun nextRef() = refs.incrementAndGet().toString()
 
     fun connect() {
         val url = "${Supabase.URL.replace("https://", "wss://")}/realtime/v1/websocket?apikey=${Supabase.KEY}&vsn=1.0.0"
@@ -35,13 +41,34 @@ class StoreRealtime(private val api: Supabase, private val onChange: () -> Unit)
                     .put("presence", JSONObject().put("key", ""))
                     .put("postgres_changes", changes))
                     .put("access_token", api.token ?: Supabase.KEY)
-                webSocket.send(JSONObject().put("topic", "realtime:public:mm-bazaar-user").put("event", "phx_join").put("payload", payload).put("ref", (++ref).toString()).toString())
+                webSocket.send(JSONObject().put("topic", "realtime:public:mm-bazaar-user").put("event", "phx_join").put("payload", payload).put("ref", nextRef()).toString())
+                heartbeat.scheduleAtFixedRate({
+                    if (!closed) {
+                        webSocket.send(JSONObject().put("topic", "phoenix").put("event", "heartbeat")
+                            .put("payload", JSONObject()).put("ref", nextRef()).toString())
+                    }
+                }, 25, 25, TimeUnit.SECONDS)
             }
             override fun onMessage(webSocket: WebSocket, text: String) {
-                if (text.contains("postgres_changes") || text.contains("INSERT") || text.contains("UPDATE") || text.contains("DELETE")) onChange()
+                runCatching {
+                    val root = JSONObject(text)
+                    if (root.optString("event") == "postgres_changes") {
+                        val payload = root.optJSONObject("payload")
+                        val data = payload?.optJSONObject("data")
+                        val table = data?.optString("table").orEmpty()
+                        onChange(table.ifBlank { "unknown" })
+                    }
+                }
             }
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { if (!closed) onChange() }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { if (!closed) onChange("connection") }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { heartbeat.shutdownNow() }
         })
     }
-    fun close() { closed = true; socket?.close(1000, "activity paused"); socket = null; client.dispatcher.executorService.shutdown() }
+    fun close() {
+        closed = true
+        heartbeat.shutdownNow()
+        socket?.close(1000, "activity paused")
+        socket = null
+        client.dispatcher.executorService.shutdown()
+    }
 }

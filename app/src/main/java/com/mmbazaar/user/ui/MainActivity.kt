@@ -61,6 +61,7 @@ class MainActivity : AppCompatActivity() {
     private var discountPreview = 0.0
     private var bannerIndex = 0
     private var initialDeepLinkHandled = false
+    private var maintenanceDialog: AlertDialog? = null
     private val bannerSlideHandler = Handler(Looper.getMainLooper())
     private val bannerSlideRunnable = object : Runnable { override fun run() { if (banners.size > 1 && !isFinishing) { bannerIndex = (bannerIndex + 1) % banners.size; showCurrentBanner(); bannerSlideHandler.postDelayed(this, 4500L) } } }
     private var walletEnabled = false
@@ -112,9 +113,9 @@ class MainActivity : AppCompatActivity() {
         b.btnFilter.setOnClickListener { showFilters() }
         b.btnLoadMore.setOnClickListener { showNextProductPage() }
         b.tvProductHeading.setOnClickListener { showCategoryPage() }
+        b.navCatalog.setOnClickListener { showCategoryPage() }
         b.navWishlist.setOnClickListener { if(toggles.optBoolean("f_s_wishlist",true)) showWishlist() else toast("পছন্দের তালিকা Admin থেকে বন্ধ রাখা হয়েছে") }
         b.navCart.setOnClickListener { showCart() }
-        b.navOrders.setOnClickListener { showOrders() }
         b.navProfile.setOnClickListener { showProfile() }
         updateHeaderCartCount()
         loadStore()
@@ -157,6 +158,7 @@ class MainActivity : AppCompatActivity() {
         try {
             val s = api.select("settings", "select=*")
             for (i in 0 until s.length()) { val row=s.getJSONObject(i); when(row.optString("id")) { "global_config" -> settings=row.optJSONObject("data") ?: JSONObject(); "feature_toggles" -> toggles=row.optJSONObject("data") ?: JSONObject() } }
+            applyAdminVisibility()
             val c=api.select("categories", "select=*&order=sort_order.asc"); categories.clear(); for(i in 0 until c.length()) if(c.getJSONObject(i).optBoolean("is_active",true)) categories.add(c.getJSONObject(i)); categoryAdapter.replace(categories)
             val ba=api.select("banners", "select=*&order=sort_order.asc"); banners.clear(); for(i in 0 until ba.length()) if(ba.getJSONObject(i).optBoolean("is_active",true)) banners.add(ba.getJSONObject(i))
             val p=api.select("products", "select=*&order=created_at.desc&limit=600"); products.clear(); for(i in 0 until p.length()) { val x=p.getJSONObject(i); if(x.optBoolean("is_active",true) && (!toggles.optBoolean("f_s_hide_out_stock",false) || availableStock(x, "", "")>0)) products.add(x) }
@@ -181,9 +183,41 @@ class MainActivity : AppCompatActivity() {
         } catch(e:Exception) { toast("ডেটা লোড হয়নি: ${e.message}") } finally { b.swipeRefresh.isRefreshing=false }
     } }
 
+    private fun applyAdminVisibility() {
+        b.tvHeaderWhatsApp.visibility = if (toggles.optBoolean("f_s_wa_checkout", true)) View.VISIBLE else View.GONE
+        b.navWishlist.visibility = if (toggles.optBoolean("f_s_wishlist", true)) View.VISIBLE else View.GONE
+        if (settings.optBoolean("maintenance", false)) {
+            if (maintenanceDialog?.isShowing != true && !isFinishing) {
+                maintenanceDialog = AlertDialog.Builder(this)
+                    .setTitle("দোকান সাময়িক বন্ধ")
+                    .setMessage("দোকানটি বর্তমানে রক্ষণাবেক্ষণে আছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।")
+                    .setCancelable(false)
+                    .setPositiveButton("ঠিক আছে", null)
+                    .create().also { dialog -> dialog.setOnDismissListener { maintenanceDialog = null }; dialog.show() }
+            }
+        } else {
+            maintenanceDialog?.dismiss()
+            maintenanceDialog = null
+        }
+    }
+
     private fun startRealtime() {
         activeRealtime?.close()
-        activeRealtime = StoreRealtime(api) { runOnUiThread { loadStore(); val v=activeChatView; val uid=api.userId; if(v!=null && uid!=null) loadChat(uid,v) } }.also { it.connect() }
+        activeRealtime = StoreRealtime(api) { table ->
+            runOnUiThread {
+                when (table) {
+                    "products", "categories", "banners", "coupons", "settings" -> loadStore()
+                    "users" -> refreshUserData()
+                    "chats", "chat_messages" -> {
+                        refreshChatBadge()
+                        val view = activeChatView
+                        val uid = api.userId
+                        if (view != null && uid != null) loadChat(uid, view)
+                    }
+                    else -> refreshChatBadge()
+                }
+            }
+        }.also { it.connect() }
     }
     private fun refreshUserData() { lifecycleScope.launch { runCatching { val u=api.select("users","select=*&id=eq.${api.userId}"); if(u.length()>0) userData=u.getJSONObject(0); refreshChatBadge() } } }
 
@@ -319,6 +353,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showCategoryPage() {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(18, 12, 18, 8) }
+        val categorySearch = EditText(this).apply { hint = "ক্যাটাগরির ভেতর সার্চ..."; setSingleLine(true); inputType = InputType.TYPE_CLASS_TEXT }
+        box.addView(categorySearch)
         val selector = Spinner(this)
         selector.adapter = spinnerAdapter(listOf("সব ক্যাটাগরি") + categories.map { it.optString("name") })
         val currentIndex = if (categoryFilter == "all") 0 else categories.indexOfFirst { it.optString("id") == categoryFilter }.let { if (it < 0) 0 else it + 1 }
@@ -359,9 +395,11 @@ class MainActivity : AppCompatActivity() {
             val minValue = minField.text.toString().toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
             val maxValue = maxField.text.toString().toDoubleOrNull()?.takeIf { it > 0 } ?: Double.MAX_VALUE
             val query = b.etSearch.text?.toString()?.trim()?.lowercase().orEmpty()
+            val localQuery = categorySearch.text?.toString()?.trim()?.lowercase().orEmpty()
             val rows = products.filter { product ->
                 val categoryName = categories.firstOrNull { it.optString("id") == product.optString("category_id") }?.optString("name").orEmpty()
-                val matchesQuery = query.isBlank() || listOf(product.optString("title"), product.optString("brand"), product.optString("description"), categoryName).any { it.lowercase().contains(query) }
+                val searchable = listOf(product.optString("title"), product.optString("brand"), product.optString("description"), categoryName)
+                val matchesQuery = (query.isBlank() || searchable.any { it.lowercase().contains(query) }) && (localQuery.isBlank() || searchable.any { it.lowercase().contains(localQuery) })
                 (id == "all" || product.optString("category_id") == id) && matchesQuery &&
                     product.optDouble("price") >= minValue && product.optDouble("price") <= maxValue &&
                     (!stockOnly.isChecked || availableStock(product, "", "") > 0)
@@ -384,6 +422,11 @@ class MainActivity : AppCompatActivity() {
             previewMore.visibility = if (previewLimit < previewRows.size) View.VISIBLE else View.GONE
             previewMore.text = "আরও পণ্য দেখুন (${(previewRows.size-previewLimit).coerceAtLeast(0)} বাকি)"
         }
+        categorySearch.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { refreshPreview() }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
         selector.onItemSelectedListener = spinnerListener { refreshPreview() }
         sort.onItemSelectedListener = spinnerListener { refreshPreview() }
         stockOnly.setOnCheckedChangeListener { _, _ -> refreshPreview() }
@@ -423,6 +466,7 @@ class MainActivity : AppCompatActivity() {
         return total
     }
     private fun addLine(p:JSONObject,size:String,color:String,qty:Int=1) {
+        if (settings.optBoolean("maintenance", false)) { toast("দোকানটি সাময়িক রক্ষণাবেক্ষণে আছে"); return }
         val left=availableStock(p,size,color); val key=cartKey(p.optString("id"),size,color); val old=cart[key]?.qty ?: 0
         if(left<=old) { toast("এই ভ্যারিয়েন্টের পর্যাপ্ত স্টক নেই"); return }
         val line=cart[key]; if(line==null) cart[key]=CartLine(p,qty,size,color) else line.qty=(line.qty+qty).coerceAtMost(left)
@@ -542,6 +586,7 @@ class MainActivity : AppCompatActivity() {
     private fun totals():Triple<Double,Double,Double> { val sub=subtotal(); val discount=if(appliedCoupon.isBlank())0.0 else discountPreview; val after=(sub-discount).coerceAtLeast(0.0); val free=settings.optDouble("free_delivery_threshold",0.0)>0&&after>=settings.optDouble("free_delivery_threshold",0.0); val delivery=if(free)0.0 else settings.optDouble(if(currentZone=="in")"del_in" else "del_out",if(currentZone=="in")60.0 else 120.0); val tax=(after*settings.optDouble("tax",0.0)/100.0).roundToInt().toDouble(); return Triple(delivery,tax,after+delivery+tax) }
 
     private fun showCheckout() {
+        if (settings.optBoolean("maintenance", false)) { toast("দোকানটি সাময়িক রক্ষণাবেক্ষণে আছে"); return }
         if(cart.isEmpty())return
         if(!toggles.optBoolean("f_s_guest_checkout",true)&&api.userId==null){showAuth();return}
         val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(20,8,20,4)}
@@ -595,6 +640,7 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun placeOrder(name:String,phone:String,address:String,notes:String,zone:String,method:String,trx:String,couponCode:String,useWallet:Boolean,dialog:AlertDialog) {
         try {
+            if (settings.optBoolean("maintenance", false)) { toast("দোকানটি সাময়িক রক্ষণাবেক্ষণে আছে"); return }
             if(api.userId!=null&&userData.optBoolean("is_blocked",false)){toast("আপনার অ্যাকাউন্ট ব্লক করা হয়েছে");return}
             val sub=subtotal();var discount=0.0
             if(couponCode.isNotBlank()){val cs=api.select("coupons","select=*&code=eq.${Uri.encode(couponCode)}&is_active=eq.true");if(cs.length()==0){toast("কুপন সঠিক নয় বা বন্ধ");return};val c=cs.getJSONObject(0);if(sub<c.optDouble("min_order",0.0)){toast("এই কুপনের ন্যূনতম অর্ডার ৳${money(c.optDouble("min_order"))}");return};val usageLimit=c.optInt("usage_limit",0);if(usageLimit>0&&usageLimit<=c.optInt("used_count",0)){toast("কুপনের ব্যবহার সীমা শেষ");return};val exp=c.optString("expires_at");if(exp.isNotBlank()&&(parseIsoMillis(exp)?.let{it<System.currentTimeMillis()} ?: (exp.take(19)<SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss",Locale.US).format(Date())))){toast("কুপনের মেয়াদ শেষ");return};discount=couponDiscount(couponCode,sub,c)}
@@ -610,14 +656,82 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openWhatsApp(name:String,phone:String,address:String,notes:String) {
+        if (settings.optBoolean("maintenance", false)) { toast("দোকানটি সাময়িক রক্ষণাবেক্ষণে আছে"); return }
         val number=settings.optString("whatsapp").ifBlank{settings.optString("phone")}.filter{it.isDigit()};if(number.isBlank()){toast("WhatsApp নম্বর সেট করা নেই");return}
-        val sub=subtotal();val zoneDel=settings.optDouble(if(currentZone=="in")"del_in" else "del_out",if(currentZone=="in")60.0 else 120.0);val tax=(sub*settings.optDouble("tax",0.0)/100.0).roundToInt().toDouble()
+        val sub=subtotal()
+        val discount=discountPreview.coerceIn(0.0,sub)
+        val afterDiscount=(sub-discount).coerceAtLeast(0.0)
+        val threshold=settings.optDouble("free_delivery_threshold",0.0)
+        val freeDelivery=threshold>0.0 && afterDiscount>=threshold
+        val zoneDel=if(freeDelivery)0.0 else settings.optDouble(if(currentZone=="in")"del_in" else "del_out",if(currentZone=="in")60.0 else 120.0)
+        val tax=(afterDiscount*settings.optDouble("tax",0.0)/100.0).roundToInt().toDouble()
+        val total=afterDiscount+zoneDel+tax
+        val paymentLabel=when(selectedPayment){"bkash"->"বিকাশ";"nagad"->"নগদ";else->"ক্যাশ অন ডেলিভারি"}
         val lines=cart.values.mapIndexed{i,l->"${i+1}. ${l.product.optString("title")}${if(l.size.isNotBlank())" | সাইজ: ${l.size}" else ""}${if(l.color.isNotBlank())" | কালার: ${l.color}" else ""} × ${l.qty} = ৳${money(l.product.optDouble("price")*l.qty)}"}
-        val msg=(listOf("নতুন অর্ডার — ${settings.optString("store_name","MM BAZAAR")}","")+lines+listOf("","সাবটোটাল: ৳${money(sub)}","ডেলিভারি: ৳${money(zoneDel)}","ট্যাক্স: ৳${money(tax)}","সর্বমোট: ৳${money(sub+zoneDel+tax)}","","নাম: $name","মোবাইল: $phone","ঠিকানা: $address",if(notes.isNotBlank())"নোট: $notes" else "")).filter{it.isNotBlank()}.joinToString("\n")
+        val msg=(listOf("নতুন অর্ডার — ${settings.optString("store_name","MM BAZAAR")}","")+lines+listOf("","সাবটোটাল: ৳${money(sub)}")+(if(discount>0)listOf("ডিসকাউন্ট: -৳${money(discount)}")else emptyList())+listOf("ডেলিভারি: ${if(freeDelivery)"ফ্রি" else "৳${money(zoneDel)}"}","ট্যাক্স: ৳${money(tax)}","সর্বমোট: ৳${money(total)}","","নাম: $name","মোবাইল: $phone","ঠিকানা: $address",if(notes.isNotBlank())"নোট: $notes" else "","পেমেন্ট: $paymentLabel")).filter{it.isNotBlank()}.joinToString("\n")
         val uri=Uri.parse("https://wa.me/88${number.removePrefix("88")}?text=${URLEncoder.encode(msg,"UTF-8")}");runCatching{startActivity(Intent(Intent.ACTION_VIEW,uri))}.onFailure{toast("WhatsApp খোলা যায়নি")}
     }
 
-    private fun showOrders() { lifecycleScope.launch { try { val rows=if(api.userId!=null)api.select("orders","select=*&user_id=eq.${api.userId}&order=created_at.desc") else if(guestOrderIds.isNotEmpty())JSONArray(api.rpc("get_guest_orders_by_ids",JSONObject().put("p_ids",JSONArray(guestOrderIds))))else JSONArray();val text=(0 until rows.length()).joinToString("\n\n"){i->val o=rows.getJSONObject(i);"#${o.optString("id").take(8)} · ${o.optString("status")}\nমোট: ৳${money(o.optDouble("total_amount"))}\n${o.optString("created_at")}"};AlertDialog.Builder(this@MainActivity).setTitle("আমার অর্ডার").setMessage(text.ifBlank{"কোনো অর্ডার পাওয়া যায়নি"}).setPositiveButton("ঠিক আছে",null).setNeutralButton("ফোন দিয়ে ট্র্যাক"){_,_->trackByPhone()}.setNegativeButton("অর্ডার বাতিল"){_,_->cancelOrderPrompt()}.show() }catch(e:Exception){toast("অর্ডার লোড হয়নি: ${e.message}")} } }
+    private fun showOrders() {
+        if (api.userId == null && guestOrderIds.isEmpty()) { showAuth(); return }
+        lifecycleScope.launch {
+            try {
+                val rows = if (api.userId != null) {
+                    api.select("orders", "select=*&user_id=eq.${api.userId}&order=created_at.desc")
+                } else {
+                    JSONArray(api.rpc("get_guest_orders_by_ids", JSONObject().put("p_ids", JSONArray(guestOrderIds))))
+                }
+                var ordersDialog: AlertDialog? = null
+                val content = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(14, 8, 14, 8) }
+                if (rows.length() == 0) {
+                    content.addView(TextView(this@MainActivity).apply { text = "আপনি এখনো কোনো অর্ডার করেননি।"; setPadding(12, 24, 12, 24); gravity = Gravity.CENTER; setTextColor(getColor(R.color.text_secondary)) })
+                } else {
+                    for (i in 0 until rows.length()) {
+                        val order = rows.getJSONObject(i)
+                        val orderId = order.optString("id")
+                        val status = order.optString("status", "unknown")
+                        val items = order.optJSONArray("items")
+                        val itemSummary = if (items == null) "" else (0 until items.length()).joinToString(", ") { index ->
+                            val item = items.optJSONObject(index) ?: JSONObject()
+                            "${item.optString("title", "পণ্য")} × ${item.optInt("qty", 1)}"
+                        }
+                        val card = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(14, 12, 14, 12); background = getDrawable(R.drawable.bg_card); layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 10 } }
+                        card.addView(TextView(this@MainActivity).apply { text = "#${orderId.take(8)}   •   $status"; textSize = 14f; setTextColor(getColor(R.color.text_main)); setTypeface(null, android.graphics.Typeface.BOLD) })
+                        card.addView(TextView(this@MainActivity).apply { text = "তারিখ: ${order.optString("created_at")}\nমোট: ৳${money(order.optDouble("total_amount"))}"; textSize = 12f; setTextColor(getColor(R.color.text_secondary)); setPadding(0, 5, 0, 5) })
+                        if (itemSummary.isNotBlank()) card.addView(TextView(this@MainActivity).apply { text = "আইটেম: $itemSummary"; textSize = 12f; setTextColor(getColor(R.color.text_secondary)) })
+                        val courier = order.optJSONObject("courier_info")
+                        val tracking = courier?.optString("trackingId").orEmpty()
+                        if (tracking.isNotBlank()) card.addView(TextView(this@MainActivity).apply { text = "ট্র্যাকিং: ${courier?.optString("service").orEmpty()} - $tracking"; textSize = 12f; setTextColor(getColor(R.color.success)); setPadding(0, 6, 0, 0) })
+                        if (status.equals("pending", true)) {
+                            card.addView(Button(this@MainActivity).apply {
+                                text = "অর্ডার বাতিল করুন"
+                                setOnClickListener {
+                                    AlertDialog.Builder(this@MainActivity).setMessage("আপনি কি এই অর্ডারটি বাতিল করতে চান?")
+                                        .setPositiveButton("হ্যাঁ, বাতিল করুন") { _, _ ->
+                                            lifecycleScope.launch {
+                                                runCatching { api.rpc("cancel_order_atomic", JSONObject().put("p_order_id", orderId)) }
+                                                    .onSuccess { ordersDialog?.dismiss(); toast("অর্ডার বাতিলের অনুরোধ সফল"); showOrders() }
+                                                    .onFailure { toast("অর্ডার বাতিল হয়নি: ${it.message}") }
+                                            }
+                                        }.setNegativeButton("ফিরে যান", null).show()
+                                }
+                            })
+                        }
+                        content.addView(card)
+                    }
+                }
+                ordersDialog = AlertDialog.Builder(this@MainActivity).setTitle("আমার অর্ডারসমূহ")
+                    .setView(ScrollView(this@MainActivity).apply { addView(content) })
+                    .setPositiveButton("বন্ধ", null)
+                    .setNeutralButton("ফোন দিয়ে ট্র্যাক") { _, _ -> trackByPhone() }
+                    .create()
+                ordersDialog?.show()
+                ordersDialog?.window?.setLayout(-1, (resources.displayMetrics.heightPixels * .78f).toInt())
+            } catch (e: Exception) {
+                toast("অর্ডার লোড হয়নি: ${e.message}")
+            }
+        }
+    }
     private fun cancelOrderPrompt(){val input=EditText(this).apply{hint="সম্পূর্ণ Order ID"};AlertDialog.Builder(this).setTitle("অর্ডার বাতিল").setMessage("শুধু Pending অর্ডার বাতিল করা যাবে").setView(input).setPositiveButton("বাতিল নিশ্চিত"){_,_->lifecycleScope.launch{runCatching{api.rpc("cancel_order_atomic",JSONObject().put("p_order_id",input.text.toString().trim()));toast("বাতিলের অনুরোধ সফল")} .onFailure{toast("বাতিল হয়নি: ${it.message}")}}}.setNegativeButton("ফিরে যান",null).show()}
     private fun trackByPhone(){val input=EditText(this).apply{hint="01XXXXXXXXX";inputType=InputType.TYPE_CLASS_PHONE};AlertDialog.Builder(this).setTitle("অর্ডার ট্র্যাক করুন").setView(input).setPositiveButton("খুঁজুন"){_,_->lifecycleScope.launch{runCatching{val a=JSONArray(api.rpc("track_orders_by_phone",JSONObject().put("p_phone",input.text.toString())));val msg=(0 until a.length()).joinToString("\n\n"){i->val o=a.getJSONObject(i);"#${o.optString("id").take(8)} · ${o.optString("status")} · ৳${money(o.optDouble("total_amount"))}"};AlertDialog.Builder(this@MainActivity).setMessage(msg.ifBlank{"কোনো অর্ডার পাওয়া যায়নি"}).setPositiveButton("ঠিক আছে",null).show()}.onFailure{toast("ট্র্যাক করা যায়নি: ${it.message}")}}}.setNegativeButton("বাতিল",null).show()}
 
@@ -714,7 +828,7 @@ class MainActivity : AppCompatActivity() {
     private fun spinnerAdapter(items:List<String>)=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,items)
     private fun label(s:String)=TextView(this).apply{text=s;textSize=13f;setTextColor(getColor(R.color.text_secondary));setPadding(0,8,0,2)}
     private fun money(n:Double)=String.format(Locale.US,"%,.0f",n)
-    private fun nowIso()=SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.US).format(Date())
+    private fun nowIso()=SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(Date())
     private fun spinnerListener(action:()->Unit)=object:AdapterView.OnItemSelectedListener{override fun onNothingSelected(parent:AdapterView<*>?){};override fun onItemSelected(parent:AdapterView<*>?,view:View?,position:Int,id:Long)=action()}
     private fun toast(s:String)=Toast.makeText(this,s,Toast.LENGTH_LONG).show()
 }
