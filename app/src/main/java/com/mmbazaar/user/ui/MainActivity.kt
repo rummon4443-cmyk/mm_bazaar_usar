@@ -63,6 +63,7 @@ class MainActivity : AppCompatActivity() {
     private var productDisplayLimit = 20
     private val productPageSize = 20
     private val guestOrderIds = mutableListOf<String>()
+    private val guestOrderTokens = mutableMapOf<String, String>()
     private var userData = JSONObject()
     private lateinit var productAdapter: ProductAdapter
     private lateinit var categoryAdapter: CategoryAdapter
@@ -195,6 +196,7 @@ class MainActivity : AppCompatActivity() {
     private fun restoreLocal() {
         runCatching { val a = JSONArray(prefs.getString("wishlist", "[]")); for (i in 0 until a.length()) wishlist.add(a.optString(i)) }
         runCatching { val a = JSONArray(prefs.getString("guest_orders", "[]")); for (i in 0 until a.length()) guestOrderIds.add(a.optString(i)) }
+        runCatching { val o = JSONObject(prefs.getString("guest_order_tokens", "{}")); val k = o.keys(); while (k.hasNext()) { val id = k.next(); guestOrderTokens[id] = o.optString(id) } }
         runCatching {
             val a = JSONArray(prefs.getString("cart", "[]"))
             for (i in 0 until a.length()) { val r = a.getJSONObject(i); val p = r.getJSONObject("product"); val size = r.optString("size"); val color = r.optString("color"); cart[cartKey(p.optString("id"), size, color)] = CartLine(p, r.optInt("qty", 1), size, color) }
@@ -203,7 +205,7 @@ class MainActivity : AppCompatActivity() {
     private fun cartKey(id: String, size: String, color: String) = "$id|$size|$color"
     private fun saveLocal() {
         val a = JSONArray(); cart.values.forEach { a.put(JSONObject().put("product", it.product).put("qty", it.qty).put("size", it.size).put("color", it.color)) }
-        prefs.edit().putString("cart", a.toString()).putString("wishlist", JSONArray(wishlist.toList()).toString()).putString("guest_orders", JSONArray(guestOrderIds).toString()).apply()
+        prefs.edit().putString("cart", a.toString()).putString("wishlist", JSONArray(wishlist.toList()).toString()).putString("guest_orders", JSONArray(guestOrderIds).toString()).putString("guest_order_tokens", JSONObject().apply { guestOrderTokens.forEach { (id, token) -> put(id, token) } }.toString()).apply()
         updateHeaderCartCount()
     }
 
@@ -932,11 +934,12 @@ class MainActivity : AppCompatActivity() {
             if(total<settings.optDouble("min_order",0.0)){toast("ন্যূনতম অর্ডার ৳${money(settings.optDouble("min_order"))}");return}
             val items=JSONArray();cart.values.forEach{items.put(JSONObject().put("id",it.product.optString("id")).put("qty",it.qty).put("selectedSize",it.size).put("selectedColor",it.color))}
             val payload=JSONObject().put("p_customer_name",name).put("p_phone",phone).put("p_address",address).put("p_notes",notes).put("p_delivery_zone",zone).put("p_delivery_charge",del).put("p_tax",tax).put("p_wallet_used",walletUsed).put("p_payment_method",method).put("p_trx_id",trx).put("p_coupon_code",couponCode).put("p_items",items)
-            val result=api.rpc("place_order_atomic",payload);val orderId=result.trim().trim('"')
+            val result=api.rpc("place_order_with_guest_token",payload);val response=JSONObject(result);val orderId=response.optString("order_id");val accessToken=response.optString("access_token")
             if (api.userId == null && orderId.isNotBlank()) {
+                if (accessToken.isNotBlank()) guestOrderTokens[orderId] = accessToken
                 guestOrderIds.remove(orderId)
                 guestOrderIds.add(0, orderId)
-                while (guestOrderIds.size > 15) guestOrderIds.removeAt(guestOrderIds.lastIndex)
+                while (guestOrderIds.size > 15) { val removed = guestOrderIds.removeAt(guestOrderIds.lastIndex); guestOrderTokens.remove(removed) }
             }
             cart.clear();appliedCoupon="";discountPreview=0.0;walletEnabled=false;saveLocal();dialog.dismiss();if(api.userId!=null)refreshUserData()
             AlertDialog.Builder(this).setTitle("অর্ডার সফল হয়েছে").setMessage("আপনার অর্ডার গ্রহণ করা হয়েছে।\nঅর্ডার আইডি: ${orderId.take(18)}").setPositiveButton("আমার অর্ডার"){_,_->showOrders()}.setNegativeButton("ঠিক আছে",null).show()
@@ -968,7 +971,7 @@ class MainActivity : AppCompatActivity() {
                 val rows = if (api.userId != null) {
                     api.select("orders", "select=*&user_id=eq.${api.userId}&order=created_at.desc")
                 } else {
-                    JSONArray(api.rpc("get_guest_orders_by_ids", JSONObject().put("p_ids", JSONArray(guestOrderIds))))
+                    JSONArray().apply { guestOrderIds.forEach { id -> guestOrderTokens[id]?.takeIf { it.isNotBlank() }?.let { token -> val result = JSONArray(api.rpc("get_guest_orders_with_token", JSONObject().put("p_order_id", id).put("p_access_token", token))); for (j in 0 until result.length()) put(result.getJSONObject(j)) } } }
                 }
                 var ordersDialog: AlertDialog? = null
                 val content = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(14, 8, 14, 8) }
@@ -998,7 +1001,7 @@ class MainActivity : AppCompatActivity() {
                                     AlertDialog.Builder(this@MainActivity).setMessage("আপনি কি এই অর্ডারটি বাতিল করতে চান?")
                                         .setPositiveButton("হ্যাঁ, বাতিল করুন") { _, _ ->
                                             lifecycleScope.launch {
-                                                runCatching { api.rpc("cancel_order_atomic", JSONObject().put("p_order_id", orderId)) }
+                                                runCatching { api.rpc("cancel_guest_order_with_token", JSONObject().put("p_order_id", orderId).put("p_access_token", guestOrderTokens[orderId] ?: JSONObject.NULL)) }
                                                     .onSuccess { ordersDialog?.dismiss(); toast("অর্ডার বাতিলের অনুরোধ সফল"); showOrders() }
                                                     .onFailure { toast("অর্ডার বাতিল হয়নি: ${it.message}") }
                                             }
@@ -1021,7 +1024,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-    private fun cancelOrderPrompt(){val input=EditText(this).apply{hint="সম্পূর্ণ Order ID"};AlertDialog.Builder(this).setTitle("অর্ডার বাতিল").setMessage("শুধু Pending অর্ডার বাতিল করা যাবে").setView(input).setPositiveButton("বাতিল নিশ্চিত"){_,_->lifecycleScope.launch{runCatching{api.rpc("cancel_order_atomic",JSONObject().put("p_order_id",input.text.toString().trim()));toast("বাতিলের অনুরোধ সফল")} .onFailure{toast("বাতিল হয়নি: ${it.message}")}}}.setNegativeButton("ফিরে যান",null).show()}
     private fun trackByPhone() {
         val input = EditText(this).apply {
             hint = "01XXXXXXXXX"
