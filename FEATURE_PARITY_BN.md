@@ -1,69 +1,62 @@
-# HTML বনাম Android Native Feature Audit
+# MM BAZAAR HTML বনাম Android Native Feature Audit
 
-রেফারেন্স: `reference-html/index.html` (ব্যবহারকারীর দেওয়া HTML)।
+**Reference:** ব্যবহারকারীর দেওয়া `index.html` এবং এই Android project-এর Kotlin/XML source.
 
-## Native project-এ থাকা/আংশিকভাবে থাকা
-- Supabase REST/Auth সংযোগ এবং একই Supabase project ব্যবহার
-- Products, categories, settings, feature toggles লোড
-- Realtime refresh
-- Product listing, search, category filter, price/stock filter, sorting
-- Product detail, size/color selection ও variant stock check
-- Cart, quantity পরিবর্তন, local cart persistence
-- Wishlist
-- Checkout, coupon validation, delivery zone, tax, COD/bKash/Nagad, wallet preview, WhatsApp checkout
+এই Android app WebView নয়; এটি Kotlin + native Android XML UI. তাই HTML/PWA-র browser-only implementation-গুলোকে হুবহু কপি না করে প্রয়োজনমতো Native সমতুল্য ব্যবহার করা হয়েছে.
+
+## Android Native-এ থাকা ফিচার
+
+- একই Supabase project-এর REST/Auth সংযোগ, session refresh এবং local session persistence
+- Products, categories, banners, settings ও feature toggles লোড; Supabase Realtime refresh
+- Product listing, smart search (বাংলা/ইংরেজি synonym), voice search, recent search history
+- Category/catalog screen, category filter, price/stock filter, sorting ও load-more pagination
+- Product details, size/color selection, variant stock check, product image gallery, image zoom, product share ও deep links
+- Cart, quantity control, local cart persistence, swipe-to-delete ও undo Snackbar, wishlist
+- Coupon validation, coupon constraints, discount calculation, delivery zone, tax, free-delivery threshold/progress
+- Checkout, COD/bKash/Nagad visibility, wallet preview, WhatsApp checkout, minimum order checks
 - Order placement, order list, guest order tracking by phone, pending order cancel
-- Sign in, sign up, password reset, profile edit
-- Customer support chat এবং product reviews
-- Banner carousel (basic), banner link, offer cards, flash sale listing
-- Recently viewed products (basic), product share, image zoom
-- Admin-controlled settings/toggles: brand, old price, size, color, banners, flash sale, guest checkout, hide out-of-stock, notice, WhatsApp checkout, wishlist
-- Native dark mode preference control
+- Sign in, sign up, password reset, profile edit, blocked-account check
+- Profile actions: return/privacy/about policy, Facebook, YouTube, hotline
+- Customer support chat, unread badge, message history and message send
+- Product reviews display, review submission, Admin reply display
+- Banner carousel/link, offer cards, flash sale listing/countdown, recently viewed products
+- Admin-controlled feature visibility: brand, old price, size/color, banners, flash sale, guest checkout, hide out-of-stock, notice, WhatsApp checkout, wishlist
+- Dark mode, scroll-to-top
+- Product and page deep links
 
-## এই ধাপে Native-এ যুক্ত করা হয়েছে (Build/Device test বাকি)
-- Recent Search: সর্বশেষ ৬টি সার্চ স্থানীয়ভাবে সংরক্ষণ, ফোকাসে চিপ দেখানো, চিপ থেকে সার্চ এবং সব হিস্ট্রি মুছুন
-- Category Page: ফুল-স্ক্রিন Native ক্যাটালগ ভিউ, ক্যাটাগরি Dropdown এবং নির্বাচিত ক্যাটাগরির পণ্য তালিকা
-- Product Gallery: `image_url`, `image_gallery` এবং `imageGallery` থেকে সব আলাদা ছবি, থাম্বনেইল নির্বাচন, বড় ছবি এবং সোয়াইপ করে পরের/আগের ছবি
-- Cart Coupon Panel: Supabase `coupons` টেবিল থেকে সক্রিয় কুপন যাচাই, মেয়াদ, usage limit, minimum order, max discount, প্রয়োগ ও সরানো
-- Cart Discount Badge এবং Admin-এর `free_delivery_threshold`, `del_in`, `del_out`, `tax` অনুযায়ী হিসাব
-- Free Delivery Progress Bar
-- Cart item-এর swipe-left delete এবং আলাদা quantity +/- ও delete controls
-- Flash Sale-এর live countdown; নিকটতম ভবিষ্যৎ `flash_ends_at` পর্যন্ত সময় দেখানো
-- Recently Viewed: সর্বশেষ ১০টি product ID রাখা, হোমে সর্বশেষ ৬টি ছবিসহ card দেখানো
-- Scroll-to-Top control
-- Product deep link (`?p=PRODUCT_ID`) এবং page deep link (`?go=home|category|products|cart|wishlist|profile` বা `?page=...`), Android intent filter-সহ
+## এই আপডেটে করা অতিরিক্ত সংশোধন
 
-## এখনো অসম্পূর্ণ বা যাচাই বাকি
-- এই ধাপে যোগ করা ফিচারগুলোর Android SDK/Gradle build, emulator ও বাস্তব Android ডিভাইসে functional test
-- Admin app থেকে প্রতিটি coupon/flash sale/category/image-gallery setting পরিবর্তন করে end-to-end পরীক্ষা
-- Profile-এর সব guest/user state ও policy/social/hotline UI parity
-- Customer chat-এর unread badge/notification parity এবং realtime message behavior পূর্ণ যাচাই
-- Product reviews-এর HTML-সমতুল্য সম্পূর্ণ display/reply states
-- Admin app-এর প্রতিটি global_config field ও প্রতিটি feature toggle বাস্তব ডেটা দিয়ে end-to-end যাচাই
-- Checkout/order totals ও সব payment/coupon edge case বাস্তব Supabase-এ end-to-end পরীক্ষা
-- UI layout, responsive behavior, accessibility ও Android device testing
-- Profile-এর সব guest/user state ও policy/social/hotline UI parity
-- Customer chat-এর unread badge/notification parity এবং realtime message behavior পূর্ণ যাচাই
-- Product reviews-এর HTML-সমতুল্য সম্পূর্ণ display/reply states
-- Admin app-এর প্রতিটি global_config field ও প্রতিটি feature toggle বাস্তব ডেটা দিয়ে end-to-end যাচাই
-- Checkout/order totals ও সব payment/coupon edge case বাস্তব Supabase-এ end-to-end পরীক্ষা
-- UI layout, responsive behavior, accessibility ও Android device testing
+- `global_config` এবং `feature_toggles`-এ default values-এর সঙ্গে remote JSON merge; Admin শুধু কয়েকটি key পাঠালেও বাকি defaults বজায় থাকে
+- `reviews` table-এর Realtime subscription; product detail খোলা থাকলে review list refresh হয়
+- Customer support chat-এর foreground incoming-message notification channel; নতুন incoming message এলে notification, tap করলে chat খোলে
+- Android 13+ এ chat notification permission চাওয়ার ব্যবস্থা
+- Logged-in customer-এর `is_blocked` flag refresh-এ পরীক্ষা করে blocked account sign-out
+- GitHub Actions workflow এখন `main`/`master` branch-এ push, pull request এবং manual dispatch-এ Debug APK build চালায়
+- App version: 1.2.0 (versionCode 4)
 
-## PWA-নির্দিষ্ট HTML অংশ
-Service worker, browser install prompt এবং web manifest Android Native app-এ সরাসরি প্রয়োজনীয় নয়; এগুলোকে Native feature হিসেবে অনুলিপি করা হয়নি।
+## PWA / Browser-only ফিচার
 
-**সতর্কতা:** এই তালিকার বাকি কাজগুলো শেষ ও বাস্তব ডিভাইস/ব্যাকএন্ডে যাচাই না হওয়া পর্যন্ত অ্যাপটিকে সম্পূর্ণ বলা যাবে না।
+এগুলো Native Android app-এ সরাসরি প্রয়োজন হয় না:
 
+- Service Worker এবং browser cache lifecycle
+- Web App Manifest
+- `beforeinstallprompt` / browser install banner
+- Browser SEO / Open Graph metadata
+- DOM-specific hover, browser history ও web-only animation behavior
 
-## পরবর্তী সংশোধন: Admin Settings ও Chat (Static source update)
+Native app-এ এদের প্রয়োজনীয় user-facing কাজ Android UI, native navigation, app icon/manifest ও native caching/runtime দিয়ে পরিচালিত হয়; browser-only implementation যোগ করা হয়নি.
 
-- `global_config` এবং `feature_toggles` partial JSON merge: reference defaults বজায় থাকে।
-- Maintenance Mode: add-to-cart, checkout, order submit এবং WhatsApp checkout block।
-- Payment toggles: সব payment বন্ধ থাকলে checkout-এ কোনো fallback COD method যোগ হয় না; bKash/Nagad number blank থাকলে option দেখানো হয় না।
-- Wishlist toggle off হলে bottom-nav hide এবং direct wishlist access block।
-- Header chat shortcut ও `unread_for_user` badge.
-- Chat open করলে `unread_for_user=false` update.
-- Foreground unread change notification channel, permission request এবং tap-to-open-chat intent.
-- Realtime subscriptions-এ `chats`, `chat_messages`, `reviews`; Phoenix heartbeat এবং exponential reconnect.
-- Chat timestamp UTC-তে format.
+## এখনো বাহ্যিক সেটআপ বা যাচাই প্রয়োজন
 
-এই আপডেটের পরও FCM background push, বাস্তব Supabase RLS/Publication, Admin থেকে toggle flip করে live verification, checkout RPC totals এবং device test বাকি। এই ZIP-এর নতুন সংস্করণ Android SDK/Gradle দিয়ে build করে যাচাই করা হয়নি।
+- **FCM background/terminated push notification:** এই ZIP-এ Firebase project config, FCM sender বা server-side push sender নেই। তাই অ্যাপ background/বন্ধ থাকলে chat push notification পাঠানো সম্ভব নয়। বর্তমান notification কেবল অ্যাপ foreground-এ Realtime event পেলে কাজ করে।
+- Supabase dashboard-এ `reviews`, `chats`, `chat_messages` এবং অন্যান্য প্রয়োজনীয় table-এর Realtime publication চালু আছে কি না যাচাই
+- Supabase RLS policies এবং RPC permissions বাস্তব project-এ যাচাই
+- Admin app থেকে settings/toggles/coupons/flash-sale/gallery পরিবর্তন করে end-to-end test
+- বাস্তব Supabase data দিয়ে checkout, coupon, wallet, delivery, payment এবং order RPC edge cases পরীক্ষা
+- Android SDK/Gradle দিয়ে সম্পূর্ণ build, emulator ও বাস্তব ফোনে UI/functional testing
+
+## Build অবস্থা ও সীমাবদ্ধতা
+
+এই কাজের execution environment-এ Android SDK/Gradle installation পাওয়া যায়নি, তাই এখানে APK compile করা সম্ভব হয়নি। XML files parse করে যাচাই করা হয়েছে; Kotlin source-এ syntax-level parser error পাওয়া যায়নি, কিন্তু এটি Android compile test-এর বিকল্প নয়। GitHub Actions workflow push-এর পর Debug APK build করার জন্য প্রস্তুত করা হয়েছে। Build fail হলে Actions log দেখে পরবর্তী সংশোধন করতে হবে.
+
+**গুরুত্বপূর্ণ:** কোডে feature implementation থাকা আর Supabase/বাস্তব Android device-এ end-to-end verified হওয়া এক বিষয় নয়। উপরের বাহ্যিক যাচাইগুলো সম্পন্ন না হওয়া পর্যন্ত app-কে production-ready বলা হচ্ছে না।
