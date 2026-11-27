@@ -1,7 +1,7 @@
 name: Build MM BAZAAR User APK
 on:
   workflow_dispatch:
-  push:
+#   push:
     branches: [ main, master ]
 permissions:
   contents: read
