@@ -37,6 +37,7 @@
                     <com.google.android.material.button.MaterialButton android:id="@+id/btnFilter" android:layout_width="wrap_content" android:layout_height="36dp" android:text="ফিল্টার" android:textSize="11sp" android:insetTop="0dp" android:insetBottom="0dp" app:cornerRadius="8dp"/>
                 </LinearLayout>
                 <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvProducts" android:layout_width="match_parent" android:layout_height="wrap_content" android:nestedScrollingEnabled="false" android:paddingHorizontal="8dp" android:clipToPadding="false"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLoadMore" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_horizontal" android:layout_marginTop="10dp" android:layout_marginBottom="12dp" android:text="আরও পণ্য দেখুন" android:visibility="gone" app:cornerRadius="10dp"/>
                 <TextView android:id="@+id/tvEmpty" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="30dp" android:gravity="center" android:text="পণ্য পাওয়া যায়নি" android:visibility="gone" android:textColor="@color/text_secondary"/>
             </LinearLayout>
         </ScrollView>

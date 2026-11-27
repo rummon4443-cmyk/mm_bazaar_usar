@@ -47,6 +47,9 @@ class MainActivity : AppCompatActivity() {
     private var maxPrice = Double.MAX_VALUE
     private var onlyInStock = false
     private var sortMode = "newest"
+    private var filteredProducts: List<JSONObject> = emptyList()
+    private var productDisplayLimit = 20
+    private val productPageSize = 20
     private val guestOrderIds = mutableListOf<String>()
     private var userData = JSONObject()
     private lateinit var productAdapter: ProductAdapter
@@ -107,6 +110,7 @@ class MainActivity : AppCompatActivity() {
         b.tvTheme.setOnClickListener { val dark = !prefs.getBoolean("dark_mode", false); prefs.edit().putBoolean("dark_mode", dark).apply(); recreate() }
         b.navHome.setOnClickListener { categoryFilter = "all"; b.tvProductHeading.text = "সকল পণ্য"; applyFilter() }
         b.btnFilter.setOnClickListener { showFilters() }
+        b.btnLoadMore.setOnClickListener { showNextProductPage() }
         b.tvProductHeading.setOnClickListener { showCategoryPage() }
         b.navWishlist.setOnClickListener { if(toggles.optBoolean("f_s_wishlist",true)) showWishlist() else toast("পছন্দের তালিকা Admin থেকে বন্ধ রাখা হয়েছে") }
         b.navCart.setOnClickListener { showCart() }
@@ -171,7 +175,7 @@ class MainActivity : AppCompatActivity() {
             b.bannerDots.visibility=if(bannersOn && banners.size > 1) View.VISIBLE else View.GONE
             b.tvBanner.text=banners.firstOrNull()?.optString("title")?.ifBlank { settings.optString("store_name","MM BAZAAR") } ?: settings.optString("store_name","MM BAZAAR")
             if(bannersOn) { bannerIndex = 0; showCurrentBanner(); bannerSlideHandler.removeCallbacks(bannerSlideRunnable); bannerSlideHandler.postDelayed(bannerSlideRunnable, 4500L); b.ivBanner.setOnClickListener { banners.getOrNull(bannerIndex)?.optString("link_url")?.takeIf { it.startsWith("http") }?.let { url -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } } } else { bannerSlideHandler.removeCallbacks(bannerSlideRunnable) }
-            if(api.userId!=null) refreshUserData()
+            if(api.userId!=null) { refreshUserData(); refreshChatBadge() } else { b.tvHeaderChat.text="💬" }
             applyFilter()
             if (!initialDeepLinkHandled) { initialDeepLinkHandled = true; handleDeepLink(intent) }
         } catch(e:Exception) { toast("ডেটা লোড হয়নি: ${e.message}") } finally { b.swipeRefresh.isRefreshing=false }
@@ -181,7 +185,7 @@ class MainActivity : AppCompatActivity() {
         activeRealtime?.close()
         activeRealtime = StoreRealtime(api) { runOnUiThread { loadStore(); val v=activeChatView; val uid=api.userId; if(v!=null && uid!=null) loadChat(uid,v) } }.also { it.connect() }
     }
-    private fun refreshUserData() { lifecycleScope.launch { runCatching { val u=api.select("users","select=*&id=eq.${api.userId}"); if(u.length()>0) userData=u.getJSONObject(0) } } }
+    private fun refreshUserData() { lifecycleScope.launch { runCatching { val u=api.select("users","select=*&id=eq.${api.userId}"); if(u.length()>0) userData=u.getJSONObject(0); refreshChatBadge() } } }
 
     private fun renderOffers() {
         val target = b.offerContainer; target.removeAllViews()
@@ -275,12 +279,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun applyFilter() {
+    private fun applyFilter(resetPage: Boolean = true) {
         val q=b.etSearch.text?.toString()?.trim()?.lowercase().orEmpty()
-        val list=products.filter { p -> val cat=categories.firstOrNull { it.optString("id")==p.optString("category_id") }?.optString("name").orEmpty(); val price=p.optDouble("price"); (categoryFilter=="all" || p.optString("category_id")==categoryFilter) && (q.isBlank() || listOf(p.optString("title"),p.optString("brand"),p.optString("description"),cat).any{it.lowercase().contains(q)}) && price>=minPrice && price<=maxPrice && (!onlyInStock || availableStock(p,"","")>0) }.toMutableList()
+        val list=products.filter { p ->
+            val cat=categories.firstOrNull { it.optString("id")==p.optString("category_id") }?.optString("name").orEmpty()
+            val price=p.optDouble("price")
+            (categoryFilter=="all" || p.optString("category_id")==categoryFilter) &&
+                (q.isBlank() || listOf(p.optString("title"),p.optString("brand"),p.optString("description"),cat,p.optString("price")).any{it.lowercase().contains(q)}) &&
+                price>=minPrice && price<=maxPrice && (!onlyInStock || availableStock(p,"","")>0)
+        }.toMutableList()
         when(sortMode){"price_asc"->list.sortBy{it.optDouble("price")};"price_desc"->list.sortByDescending{it.optDouble("price")};else->list.sortByDescending{it.optString("created_at")}}
-        productAdapter.replace(list); b.tvProductCount.text="${list.size} টি পণ্য"; b.tvEmpty.visibility=if(list.isEmpty()) View.VISIBLE else View.GONE
+        filteredProducts = list
+        if (resetPage) productDisplayLimit = productPageSize
+        productAdapter.replace(filteredProducts.take(productDisplayLimit))
+        b.tvProductCount.text="${list.size} টি পণ্য"
+        b.tvEmpty.visibility=if(list.isEmpty()) View.VISIBLE else View.GONE
+        b.btnLoadMore.visibility=if(filteredProducts.size>productDisplayLimit) View.VISIBLE else View.GONE
+        b.btnLoadMore.text="আরও পণ্য দেখুন (${(filteredProducts.size-productDisplayLimit).coerceAtLeast(0)} বাকি)"
     }
+
+    private fun showNextProductPage() {
+        if (productDisplayLimit >= filteredProducts.size) { b.btnLoadMore.visibility=View.GONE; return }
+        productDisplayLimit = (productDisplayLimit + productPageSize).coerceAtMost(filteredProducts.size)
+        productAdapter.replace(filteredProducts.take(productDisplayLimit))
+        b.btnLoadMore.visibility=if(productDisplayLimit<filteredProducts.size) View.VISIBLE else View.GONE
+        b.btnLoadMore.text="আরও পণ্য দেখুন (${(filteredProducts.size-productDisplayLimit).coerceAtLeast(0)} বাকি)"
+    }
+
     private fun showFilters() {
         val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(20,8,20,0)}
         val min=EditText(this).apply{hint="সর্বনিম্ন দাম";inputType=InputType.TYPE_CLASS_NUMBER;setText(if(minPrice>0)minPrice.toInt().toString() else "")}
@@ -318,6 +343,9 @@ class MainActivity : AppCompatActivity() {
         box.addView(label("পণ্য সাজান")); box.addView(sort)
 
         val count = TextView(this).apply { setPadding(0, 12, 0, 4); setTextColor(getColor(R.color.text_secondary)) }
+        var previewRows: List<JSONObject> = emptyList()
+        var previewLimit = productPageSize
+        val previewMore = android.widget.Button(this).apply { text = "আরও পণ্য দেখুন"; visibility = View.GONE }
         val list = RecyclerView(this).apply {
             layoutManager = GridLayoutManager(this@MainActivity, 2)
             isNestedScrollingEnabled = false
@@ -343,14 +371,25 @@ class MainActivity : AppCompatActivity() {
                 2 -> rows.sortByDescending { it.optDouble("price") }
                 else -> rows.sortByDescending { it.optString("created_at") }
             }
-            adapter.replace(rows)
+            previewRows = rows
+            previewLimit = productPageSize
+            adapter.replace(previewRows.take(previewLimit))
             count.text = "${rows.size} টি পণ্য পাওয়া গেছে"
+            previewMore.visibility = if (previewRows.size > previewLimit) View.VISIBLE else View.GONE
+            previewMore.text = "আরও পণ্য দেখুন (${(previewRows.size-previewLimit).coerceAtLeast(0)} বাকি)"
+        }
+        previewMore.setOnClickListener {
+            previewLimit = (previewLimit + productPageSize).coerceAtMost(previewRows.size)
+            adapter.replace(previewRows.take(previewLimit))
+            previewMore.visibility = if (previewLimit < previewRows.size) View.VISIBLE else View.GONE
+            previewMore.text = "আরও পণ্য দেখুন (${(previewRows.size-previewLimit).coerceAtLeast(0)} বাকি)"
         }
         selector.onItemSelectedListener = spinnerListener { refreshPreview() }
         sort.onItemSelectedListener = spinnerListener { refreshPreview() }
         stockOnly.setOnCheckedChangeListener { _, _ -> refreshPreview() }
         box.addView(count)
         box.addView(list, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * .34f).toInt()))
+        box.addView(previewMore, LinearLayout.LayoutParams(-1, LinearLayout.LayoutParams.WRAP_CONTENT))
         refreshPreview()
 
         val dialog = AlertDialog.Builder(this).setTitle("ক্যাটালগ / ক্যাটাগরি")
@@ -395,7 +434,7 @@ class MainActivity : AppCompatActivity() {
         if (hasSizes || hasColors) showProduct(p) else addLine(p, "", "")
     }
     private fun toggleWish(p:JSONObject) { if(!toggles.optBoolean("f_s_wishlist",true)){toast("পছন্দের তালিকা Admin থেকে বন্ধ রাখা হয়েছে");return}; val id=p.optString("id"); if(!wishlist.add(id)) wishlist.remove(id); saveLocal(); toast(if(wishlist.contains(id)) "পছন্দের তালিকায় যোগ হয়েছে" else "পছন্দের তালিকা থেকে সরানো হয়েছে") }
-    private fun showWishlist() { productAdapter.replace(products.filter{wishlist.contains(it.optString("id"))}); b.tvProductHeading.text="পছন্দের তালিকা"; b.tvProductCount.text="${wishlist.size} টি পণ্য"; b.tvEmpty.visibility=if(wishlist.isEmpty()) View.VISIBLE else View.GONE }
+    private fun showWishlist() { val rows=products.filter{wishlist.contains(it.optString("id"))}; filteredProducts=rows; productDisplayLimit=rows.size; productAdapter.replace(rows); b.btnLoadMore.visibility=View.GONE; b.tvProductHeading.text="পছন্দের তালিকা"; b.tvProductCount.text="${wishlist.size} টি পণ্য"; b.tvEmpty.visibility=if(wishlist.isEmpty()) View.VISIBLE else View.GONE }
 
     private fun showProduct(p:JSONObject) {
         val recent = runCatching { JSONArray(prefs.getString("recent_products", "[]")) }.getOrElse { JSONArray() }
@@ -624,8 +663,52 @@ class MainActivity : AppCompatActivity() {
         }}
         dialog.show()
     }
-    private fun openChat(){if(api.userId==null){showAuth();return};val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(16,8,16,0)};val messages=TextView(this).apply{minHeight=180;setTextColor(getColor(R.color.text_main));text="চ্যাট লোড হচ্ছে…"};val input=EditText(this).apply{hint="মেসেজ লিখুন"};box.addView(ScrollView(this).apply{addView(messages)});box.addView(input);val d=AlertDialog.Builder(this).setTitle("কাস্টমার সাপোর্ট").setView(box).setPositiveButton("পাঠান",null).setNegativeButton("বন্ধ",null).create();d.setOnShowListener{d.getButton(-1).setOnClickListener{val msg=input.text.toString().trim();if(msg.isNotBlank())lifecycleScope.launch{runCatching{val uid=api.userId!!;val now=nowIso();api.upsert("chats",JSONObject().put("id",uid).put("user_id",uid).put("user_name",userData.optString("name",api.email)).put("phone",userData.optString("phone")).put("email",api.email).put("last_message",msg).put("unread_for_admin",true).put("unread_for_user",false).put("updated_at",now));api.insert("chat_messages",JSONObject().put("chat_id",uid).put("sender_id",uid).put("text",msg).put("timestamp",now));input.text.clear();loadChat(uid,messages)}.onFailure{toast("মেসেজ পাঠানো যায়নি: ${it.message}")}}}};d.setOnDismissListener { activeChatView=null }; d.show(); activeChatView=messages; loadChat(api.userId!!,messages)}
-    private fun loadChat(uid:String,target:TextView){lifecycleScope.launch{runCatching{val a=api.select("chat_messages","select=*&chat_id=eq.$uid&order=timestamp.asc");target.text=(0 until a.length()).joinToString("\n\n"){i->val m=a.getJSONObject(i);(if(m.optString("sender_id")==uid)"আপনি: " else "সাপোর্ট: ")+m.optString("text")}.ifBlank{"এখনো কোনো মেসেজ নেই"}}}}
+    private fun refreshChatBadge() {
+        val uid = api.userId
+        if (uid.isNullOrBlank()) { b.tvHeaderChat.text = "💬"; return }
+        lifecycleScope.launch {
+            runCatching {
+                val rows = api.select("chats", "select=unread_for_user&id=eq.$uid&limit=1")
+                val unread = rows.length() > 0 && rows.optJSONObject(0)?.optBoolean("unread_for_user", false) == true
+                b.tvHeaderChat.text = if (unread) "💬 1" else "💬"
+                b.tvHeaderChat.contentDescription = if (unread) "কাস্টমার চ্যাট, নতুন মেসেজ আছে" else "কাস্টমার চ্যাট"
+            }
+        }
+    }
+
+    private fun openChat() {
+        val uid = api.userId
+        if (uid.isNullOrBlank()) { showAuth(); return }
+        lifecycleScope.launch { runCatching { api.update("chats", "id=eq.$uid", JSONObject().put("unread_for_user", false)) }; refreshChatBadge() }
+        val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(16,8,16,0)}
+        val messages=TextView(this).apply{minHeight=180;setTextColor(getColor(R.color.text_main));text="চ্যাট লোড হচ্ছে…"}
+        val input=EditText(this).apply{hint="মেসেজ লিখুন"}
+        box.addView(ScrollView(this).apply{addView(messages)})
+        box.addView(input)
+        val d=AlertDialog.Builder(this).setTitle("কাস্টমার সাপোর্ট").setView(box).setPositiveButton("পাঠান",null).setNegativeButton("বন্ধ",null).create()
+        d.setOnShowListener {
+            d.getButton(-1).setOnClickListener {
+                val msg=input.text.toString().trim()
+                if(msg.isNotBlank()) lifecycleScope.launch {
+                    runCatching {
+                        val now=nowIso()
+                        api.upsert("chats",JSONObject().put("id",uid).put("user_id",uid).put("user_name",userData.optString("name",api.email)).put("phone",userData.optString("phone")).put("email",api.email).put("last_message",msg).put("unread_for_admin",true).put("unread_for_user",false).put("updated_at",now))
+                        api.insert("chat_messages",JSONObject().put("chat_id",uid).put("sender_id",uid).put("text",msg).put("timestamp",now))
+                        input.text.clear(); loadChat(uid,messages)
+                    }.onFailure{toast("মেসেজ পাঠানো যায়নি: ${it.message}")}
+                }
+            }
+        }
+        d.setOnDismissListener { activeChatView=null }
+        d.show(); activeChatView=messages; loadChat(uid,messages)
+    }
+
+    private fun loadChat(uid:String,target:TextView){
+        lifecycleScope.launch{runCatching{
+            val a=api.select("chat_messages","select=*&chat_id=eq.$uid&order=timestamp.asc")
+            target.text=(0 until a.length()).joinToString("\n\n"){i->val m=a.getJSONObject(i);(if(m.optString("sender_id")==uid)"আপনি: " else "সাপোর্ট: ")+m.optString("text")}.ifBlank{"এখনো কোনো মেসেজ নেই"}
+        }.onFailure { target.text="মেসেজ লোড করা যায়নি" }}
+    }
 
     private fun stringArray(a:JSONArray?):List<String> = if(a==null) emptyList() else (0 until a.length()).map{a.optString(it)}.filter{it.isNotBlank()}
     private fun spinnerAdapter(items:List<String>)=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,items)
