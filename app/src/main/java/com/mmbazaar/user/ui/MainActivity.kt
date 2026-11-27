@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import com.mmbazaar.user.R
 import com.mmbazaar.user.data.Supabase
@@ -294,19 +295,87 @@ class MainActivity : AppCompatActivity() {
     private fun showCategoryPage() {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(18, 12, 18, 8) }
         val selector = Spinner(this)
-        val labels = listOf("সব ক্যাটাগরি") + categories.map { it.optString("name") }
-        selector.adapter = spinnerAdapter(labels)
+        selector.adapter = spinnerAdapter(listOf("সব ক্যাটাগরি") + categories.map { it.optString("name") })
         val currentIndex = if (categoryFilter == "all") 0 else categories.indexOfFirst { it.optString("id") == categoryFilter }.let { if (it < 0) 0 else it + 1 }
         selector.setSelection(currentIndex)
         box.addView(label("ক্যাটাগরি নির্বাচন করুন")); box.addView(selector)
-        val count = TextView(this).apply { setPadding(0,12,0,4); setTextColor(getColor(R.color.text_secondary)) }
-        val list = RecyclerView(this).apply { layoutManager = LinearLayoutManager(this@MainActivity); isNestedScrollingEnabled = false }
-        val adapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) })
+
+        val minField = EditText(this).apply {
+            hint = "সর্বনিম্ন দাম (৳)"; inputType = InputType.TYPE_CLASS_NUMBER
+            setText(if (minPrice > 0) minPrice.toInt().toString() else "")
+        }
+        val maxField = EditText(this).apply {
+            hint = "সর্বোচ্চ দাম (৳)"; inputType = InputType.TYPE_CLASS_NUMBER
+            setText(if (maxPrice < Double.MAX_VALUE) maxPrice.toInt().toString() else "")
+        }
+        box.addView(label("দামের সীমা")); box.addView(minField); box.addView(maxField)
+        val stockOnly = CheckBox(this).apply { text = "শুধু স্টকে থাকা পণ্য"; isChecked = onlyInStock }
+        box.addView(stockOnly)
+        val sort = Spinner(this).apply {
+            adapter = spinnerAdapter(listOf("নতুন আগে", "দাম কম থেকে বেশি", "দাম বেশি থেকে কম"))
+            setSelection(when (sortMode) { "price_asc" -> 1; "price_desc" -> 2; else -> 0 })
+        }
+        box.addView(label("পণ্য সাজান")); box.addView(sort)
+
+        val count = TextView(this).apply { setPadding(0, 12, 0, 4); setTextColor(getColor(R.color.text_secondary)) }
+        val list = RecyclerView(this).apply {
+            layoutManager = GridLayoutManager(this@MainActivity, 2)
+            isNestedScrollingEnabled = false
+        }
+        val adapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish,
+            { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) })
         list.adapter = adapter
-        fun refresh() { val id = if (selector.selectedItemPosition == 0) "all" else categories[selector.selectedItemPosition - 1].optString("id"); val rows = products.filter { id == "all" || it.optString("category_id") == id }; adapter.replace(rows); count.text = "${rows.size} টি পণ্য" }
-        selector.onItemSelectedListener = spinnerListener { refresh() }
-        box.addView(count); box.addView(list, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * .52f).toInt()))
-        AlertDialog.Builder(this).setTitle("ক্যাটালগ / ক্যাটাগরি").setView(ScrollView(this).apply { addView(box) }).setPositiveButton("দেখুন") { _, _ -> categoryFilter = if (selector.selectedItemPosition == 0) "all" else categories[selector.selectedItemPosition - 1].optString("id"); b.tvProductHeading.text = if(categoryFilter == "all") "সকল পণ্য" else categories.firstOrNull{it.optString("id")==categoryFilter}?.optString("name") ?: "পণ্য"; applyFilter() }.setNegativeButton("বন্ধ", null).create().also { dialog -> dialog.setOnShowListener { dialog.window?.setLayout(-1, -1) }; dialog.show() }
+
+        fun refreshPreview() {
+            val id = if (selector.selectedItemPosition == 0) "all" else categories.getOrNull(selector.selectedItemPosition - 1)?.optString("id").orEmpty()
+            val minValue = minField.text.toString().toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+            val maxValue = maxField.text.toString().toDoubleOrNull()?.takeIf { it > 0 } ?: Double.MAX_VALUE
+            val query = b.etSearch.text?.toString()?.trim()?.lowercase().orEmpty()
+            val rows = products.filter { product ->
+                val categoryName = categories.firstOrNull { it.optString("id") == product.optString("category_id") }?.optString("name").orEmpty()
+                val matchesQuery = query.isBlank() || listOf(product.optString("title"), product.optString("brand"), product.optString("description"), categoryName).any { it.lowercase().contains(query) }
+                (id == "all" || product.optString("category_id") == id) && matchesQuery &&
+                    product.optDouble("price") >= minValue && product.optDouble("price") <= maxValue &&
+                    (!stockOnly.isChecked || availableStock(product, "", "") > 0)
+            }.toMutableList()
+            when (sort.selectedItemPosition) {
+                1 -> rows.sortBy { it.optDouble("price") }
+                2 -> rows.sortByDescending { it.optDouble("price") }
+                else -> rows.sortByDescending { it.optString("created_at") }
+            }
+            adapter.replace(rows)
+            count.text = "${rows.size} টি পণ্য পাওয়া গেছে"
+        }
+        selector.onItemSelectedListener = spinnerListener { refreshPreview() }
+        sort.onItemSelectedListener = spinnerListener { refreshPreview() }
+        stockOnly.setOnCheckedChangeListener { _, _ -> refreshPreview() }
+        box.addView(count)
+        box.addView(list, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * .34f).toInt()))
+        refreshPreview()
+
+        val dialog = AlertDialog.Builder(this).setTitle("ক্যাটালগ / ক্যাটাগরি")
+            .setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton("ফিল্টার প্রয়োগ করুন", null)
+            .setNeutralButton("রিসেট", null)
+            .setNegativeButton("বন্ধ", null).create()
+        dialog.setOnShowListener {
+            dialog.window?.setLayout(-1, -1)
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                categoryFilter = if (selector.selectedItemPosition == 0) "all" else categories.getOrNull(selector.selectedItemPosition - 1)?.optString("id") ?: "all"
+                minPrice = minField.text.toString().toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+                maxPrice = maxField.text.toString().toDoubleOrNull()?.takeIf { it > 0 } ?: Double.MAX_VALUE
+                onlyInStock = stockOnly.isChecked
+                sortMode = when (sort.selectedItemPosition) { 1 -> "price_asc"; 2 -> "price_desc"; else -> "newest" }
+                b.tvProductHeading.text = if (categoryFilter == "all") "সকল পণ্য" else categories.firstOrNull { it.optString("id") == categoryFilter }?.optString("name") ?: "পণ্য"
+                applyFilter(); dialog.dismiss()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                selector.setSelection(0); minField.text.clear(); maxField.text.clear(); stockOnly.isChecked = false; sort.setSelection(0)
+                minPrice = 0.0; maxPrice = Double.MAX_VALUE; onlyInStock = false; sortMode = "newest"
+                categoryFilter = "all"; refreshPreview(); b.tvProductHeading.text = "সকল পণ্য"; applyFilter()
+            }
+        }
+        dialog.show()
     }
     private fun hasVariantStock(p:JSONObject)=p.optJSONObject("variant_stock")!=null
     private fun availableStock(p:JSONObject,size:String,color:String):Int {
