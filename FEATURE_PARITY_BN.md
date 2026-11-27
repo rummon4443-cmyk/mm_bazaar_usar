@@ -19,16 +19,28 @@
 - Admin-controlled settings/toggles: brand, old price, size, color, banners, flash sale, guest checkout, hide out-of-stock, notice, WhatsApp checkout, wishlist
 - Native dark mode preference control
 
-## HTML-এর তুলনায় এখনো অসম্পূর্ণ বা যাচাই বাকি
-- Home grid-এর আলাদা Quick Add এবং Buy Now action-এর সম্পূর্ণ HTML-সমতুল্য আচরণ
-- Search-এর voice input, recent-search chips, clear/recent search management
-- Category page-এর সম্পূর্ণ আলাদা navigation/layout এবং category dropdown parity
-- Product image gallery thumbnails ও সব gallery image-এর zoom
-- Cart-এর HTML-সমতুল্য coupon panel, discount badge, delivery progress bar, swipe-to-delete
-- Flash sale-এর live countdown timer
-- Recently viewed-এর সম্পূর্ণ HTML card design ও আচরণ
-- Scroll-to-top control
-- Deep-link handling (product/page links)
+## এই ধাপে Native-এ যুক্ত করা হয়েছে (Build/Device test বাকি)
+- Recent Search: সর্বশেষ ৬টি সার্চ স্থানীয়ভাবে সংরক্ষণ, ফোকাসে চিপ দেখানো, চিপ থেকে সার্চ এবং সব হিস্ট্রি মুছুন
+- Category Page: ফুল-স্ক্রিন Native ক্যাটালগ ভিউ, ক্যাটাগরি Dropdown এবং নির্বাচিত ক্যাটাগরির পণ্য তালিকা
+- Product Gallery: `image_url`, `image_gallery` এবং `imageGallery` থেকে সব আলাদা ছবি, থাম্বনেইল নির্বাচন, বড় ছবি এবং সোয়াইপ করে পরের/আগের ছবি
+- Cart Coupon Panel: Supabase `coupons` টেবিল থেকে সক্রিয় কুপন যাচাই, মেয়াদ, usage limit, minimum order, max discount, প্রয়োগ ও সরানো
+- Cart Discount Badge এবং Admin-এর `free_delivery_threshold`, `del_in`, `del_out`, `tax` অনুযায়ী হিসাব
+- Free Delivery Progress Bar
+- Cart item-এর swipe-left delete এবং আলাদা quantity +/- ও delete controls
+- Flash Sale-এর live countdown; নিকটতম ভবিষ্যৎ `flash_ends_at` পর্যন্ত সময় দেখানো
+- Recently Viewed: সর্বশেষ ১০টি product ID রাখা, হোমে সর্বশেষ ৬টি ছবিসহ card দেখানো
+- Scroll-to-Top control
+- Product deep link (`?p=PRODUCT_ID`) এবং page deep link (`?go=home|category|products|cart|wishlist|profile` বা `?page=...`), Android intent filter-সহ
+
+## এখনো অসম্পূর্ণ বা যাচাই বাকি
+- এই ধাপে যোগ করা ফিচারগুলোর Android SDK/Gradle build, emulator ও বাস্তব Android ডিভাইসে functional test
+- Admin app থেকে প্রতিটি coupon/flash sale/category/image-gallery setting পরিবর্তন করে end-to-end পরীক্ষা
+- Profile-এর সব guest/user state ও policy/social/hotline UI parity
+- Customer chat-এর unread badge/notification parity এবং realtime message behavior পূর্ণ যাচাই
+- Product reviews-এর HTML-সমতুল্য সম্পূর্ণ display/reply states
+- Admin app-এর প্রতিটি global_config field ও প্রতিটি feature toggle বাস্তব ডেটা দিয়ে end-to-end যাচাই
+- Checkout/order totals ও সব payment/coupon edge case বাস্তব Supabase-এ end-to-end পরীক্ষা
+- UI layout, responsive behavior, accessibility ও Android device testing
 - Profile-এর সব guest/user state ও policy/social/hotline UI parity
 - Customer chat-এর unread badge/notification parity এবং realtime message behavior পূর্ণ যাচাই
 - Product reviews-এর HTML-সমতুল্য সম্পূর্ণ display/reply states

@@ -15,7 +15,8 @@ class ProductAdapter(
     private val onAdd: (JSONObject) -> Unit,
     private val onWish: (JSONObject) -> Unit,
     private val showBrand: () -> Boolean = { true },
-    private val showOldPrice: () -> Boolean = { true }
+    private val showOldPrice: () -> Boolean = { true },
+    private val showWishlist: () -> Boolean = { true }
 ) : RecyclerView.Adapter<ProductAdapter.Holder>() {
     inner class Holder(val b: ItemProductBinding) : RecyclerView.ViewHolder(b.root)
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = Holder(ItemProductBinding.inflate(LayoutInflater.from(parent.context), parent, false))
@@ -32,8 +33,9 @@ class ProductAdapter(
         val stockAvailable = p.optInt("stock") > 0 || hasVariantAvailable
         holder.b.tvStock.text = if (stockAvailable) "স্টক ${p.optInt("stock")}" else "স্টক শেষ"
         holder.b.ivProduct.load(p.optString("image_url").ifBlank { null }) { crossfade(true); placeholder(R.drawable.bg_card); error(R.drawable.bg_card) }
+        holder.b.tvWish.visibility = if (showWishlist()) android.view.View.VISIBLE else android.view.View.GONE
         holder.b.tvWish.text = if (isWishlisted(id)) "♥" else "♡"
-        holder.b.tvWish.setOnClickListener { onWish(p); notifyItemChanged(position) }
+        holder.b.tvWish.setOnClickListener { if (showWishlist()) { onWish(p); notifyItemChanged(position) } }
         holder.b.btnAdd.isEnabled = stockAvailable
         holder.b.btnAdd.text = if (stockAvailable) "বিস্তারিত / কার্টে যোগ" else "স্টক শেষ"
         holder.b.btnAdd.setOnClickListener { onAdd(p) }

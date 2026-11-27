@@ -19,3 +19,12 @@ GitHub Actions workflow `.github/workflows/build_apk.yml` দিয়েও Debug 
 - Existing RPC usage: `place_order_atomic`, `cancel_order_atomic`, `track_orders_by_phone`, `submit_review_atomic`, etc.
 
 কোনো service-role key এই অ্যাপে রাখা হয়নি।
+
+## সর্বশেষ Profile / Chat / Reviews আপডেট
+
+Guest ও signed-in profile options, policy/social/hotline links, chat unread badge, foreground notification, chat realtime subscription/heartbeat এবং product review/Admin reply display যুক্ত করা হয়েছে। বিস্তারিত schema ও সীমাবদ্ধতা `PROFILE_CHAT_REVIEWS_IMPLEMENTATION_BN.md` ফাইলে দেখুন। Background push notification-এর জন্য FCM ও server-side configuration এখনো প্রয়োজন।
+
+
+## Admin Settings Sync আপডেট
+
+Admin App-এর `global_config` ও `feature_toggles` settings row-এর সঙ্গে Native User App sync-এর বিবরণ `ADMIN_SETTINGS_PARITY_BN.md` ফাইলে আছে। Admin থেকে feature toggle বা store settings বদলালে Supabase Realtime subscription দিয়ে UI refresh হয়; connection না থাকলে ৬০ সেকেন্ডে fallback refresh হয়।
