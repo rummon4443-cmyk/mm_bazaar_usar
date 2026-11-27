@@ -3,15 +3,6 @@ package com.mmbazaar.user.ui
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.os.Build
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
@@ -72,10 +63,6 @@ class MainActivity : AppCompatActivity() {
     private var currentZone = "in"
     private var selectedPayment = "cod"
     private var activeChatView: TextView? = null
-    private var chatUnread = false
-    private var chatNotificationShown = false
-    private val chatPollHandler = Handler(Looper.getMainLooper())
-    private val chatPollRunnable = object : Runnable { override fun run() { if (!isFinishing) { refreshChatUnread(true); chatPollHandler.postDelayed(this, 20_000L) } } }
     private val refreshHandler = Handler(Looper.getMainLooper())
     private val searchHandler = Handler(Looper.getMainLooper())
     private val flashHandler = Handler(Looper.getMainLooper())
@@ -87,7 +74,7 @@ class MainActivity : AppCompatActivity() {
         val dark = getSharedPreferences("mmb_user_local", MODE_PRIVATE).getBoolean("dark_mode", false); AppCompatDelegate.setDefaultNightMode(if (dark) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO)
         super.onCreate(savedInstanceState)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
-        api = Supabase(this); restoreLocal(); createChatNotificationChannel(); requestNotificationPermissionIfNeeded()
+        api = Supabase(this); restoreLocal()
         productAdapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) })
         categoryAdapter = CategoryAdapter(mutableListOf(), ::filterCategory)
         flashAdapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) })
@@ -113,7 +100,6 @@ class MainActivity : AppCompatActivity() {
         b.mainScroll.setOnScrollChangeListener { _, _, y, _, _ -> b.btnScrollTop.visibility = if (y > 320) View.VISIBLE else View.GONE }
         renderSearchHistory()
         b.tvAccount.setOnClickListener { showProfile() }
-        b.tvChatHeader.setOnClickListener { openChat() }
         b.tvTheme.setOnClickListener { val dark = !prefs.getBoolean("dark_mode", false); prefs.edit().putBoolean("dark_mode", dark).apply(); recreate() }
         b.navHome.setOnClickListener { categoryFilter = "all"; b.tvProductHeading.text = "সকল পণ্য"; applyFilter() }
         b.btnFilter.setOnClickListener { showFilters() }
@@ -123,12 +109,11 @@ class MainActivity : AppCompatActivity() {
         b.navOrders.setOnClickListener { showOrders() }
         b.navProfile.setOnClickListener { showProfile() }
         loadStore()
-        if (intent.getBooleanExtra("open_chat", false)) b.root.post { openChat() }
     }
 
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); initialDeepLinkHandled=true; handleDeepLink(intent); if(intent.getBooleanExtra("open_chat",false)) b.root.post { openChat() } }
-    override fun onResume() { super.onResume(); startRealtime(); refreshHandler.removeCallbacks(refreshFallback); refreshHandler.postDelayed(refreshFallback, 60_000L); flashHandler.removeCallbacks(flashTicker); flashHandler.post(flashTicker); chatPollHandler.removeCallbacks(chatPollRunnable); chatPollHandler.post(chatPollRunnable); refreshChatUnread(false) }
-    override fun onPause() { refreshHandler.removeCallbacks(refreshFallback); chatPollHandler.removeCallbacks(chatPollRunnable); bannerSlideHandler.removeCallbacks(bannerSlideRunnable); flashHandler.removeCallbacks(flashTicker); activeRealtime?.close(); activeRealtime = null; super.onPause() }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); initialDeepLinkHandled=true; handleDeepLink(intent) }
+    override fun onResume() { super.onResume(); startRealtime(); refreshHandler.removeCallbacks(refreshFallback); refreshHandler.postDelayed(refreshFallback, 60_000L); flashHandler.removeCallbacks(flashTicker); flashHandler.post(flashTicker) }
+    override fun onPause() { refreshHandler.removeCallbacks(refreshFallback); bannerSlideHandler.removeCallbacks(bannerSlideRunnable); flashHandler.removeCallbacks(flashTicker); activeRealtime?.close(); activeRealtime = null; super.onPause() }
 
     private fun restoreLocal() {
         runCatching { val a = JSONArray(prefs.getString("wishlist", "[]")); for (i in 0 until a.length()) wishlist.add(a.optString(i)) }
@@ -173,7 +158,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRealtime() {
         activeRealtime?.close()
-        activeRealtime = StoreRealtime(api) { runOnUiThread { loadStore(); refreshChatUnread(true); val v=activeChatView; val uid=api.userId; if(v!=null && uid!=null) loadChat(uid,v) } }.also { it.connect() }
+        activeRealtime = StoreRealtime(api) { runOnUiThread { loadStore(); val v=activeChatView; val uid=api.userId; if(v!=null && uid!=null) loadChat(uid,v) } }.also { it.connect() }
     }
     private fun refreshUserData() { lifecycleScope.launch { runCatching { val u=api.select("users","select=*&id=eq.${api.userId}"); if(u.length()>0) userData=u.getJSONObject(0) } } }
 
@@ -331,7 +316,8 @@ class MainActivity : AppCompatActivity() {
         val stock=TextView(this).apply { setPadding(0,8,0,8) }; box.addView(stock)
         fun refreshStock() { val sz=if(sizeSpin.parent!=null && sizes.isNotEmpty() && toggles.optBoolean("f_p_size",true)) sizeSpin.selectedItem?.toString().orEmpty() else ""; val co=if(colorSpin.parent!=null && colors.isNotEmpty() && toggles.optBoolean("f_p_color",true)) colorSpin.selectedItem?.toString().orEmpty() else ""; val n=availableStock(p,sz,co); stock.text=if(n>0) "এই ভ্যারিয়েন্টে স্টক: $n" else "এই ভ্যারিয়েন্টের স্টক শেষ"; stock.setTextColor(getColor(if(n>0) R.color.success else R.color.danger)) }
         sizeSpin.onItemSelectedListener=spinnerListener { refreshStock() }; colorSpin.onItemSelectedListener=spinnerListener { refreshStock() }; refreshStock(); box.addView(desc)
-        val reviews=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(0,8,0,4) }; box.addView(reviews); renderProductReviews(p.optString("id"),reviews)
+        val reviews=TextView(this).apply { text="রিভিউ লোড হচ্ছে…"; setPadding(0,8,0,4); textSize=13f }; box.addView(reviews)
+        lifecycleScope.launch { runCatching { val r=api.select("reviews","select=*&product_id=eq.${p.optString("id")}&order=created_at.desc&limit=10"); reviews.text=if(r.length()==0) "এখনো কোনো রিভিউ নেই" else (0 until r.length()).joinToString("\n\n") { i -> val x=r.getJSONObject(i); "${x.optString("user_name","গ্রাহক")}  ${"★".repeat(x.optInt("rating").coerceIn(0,5))}\n${x.optString("text")}\n${x.optString("reply").takeIf{it.isNotBlank()}?.let{"দোকানের উত্তর: $it"}.orEmpty()}" } } }
         val buy = Button(this).apply { text = "এখনই কিনুন" }; box.addView(buy)
         val d=AlertDialog.Builder(this).setTitle("পণ্যের বিবরণ").setView(ScrollView(this).apply{addView(box)}).setPositiveButton("কার্টে যোগ করুন",null).setNeutralButton("রিভিউ লিখুন",null).setNegativeButton("বন্ধ",null).create()
         buy.setOnClickListener { val sz=if(sizes.isNotEmpty() && toggles.optBoolean("f_p_size",true)) sizeSpin.selectedItem?.toString().orEmpty() else ""; val co=if(colors.isNotEmpty() && toggles.optBoolean("f_p_color",true)) colorSpin.selectedItem?.toString().orEmpty() else ""; if(availableStock(p,sz,co)>0){ addLine(p,sz,co); d.dismiss(); showCheckout() } else toast("স্টক নেই") }
@@ -468,63 +454,22 @@ class MainActivity : AppCompatActivity() {
     private fun trackByPhone(){val input=EditText(this).apply{hint="01XXXXXXXXX";inputType=InputType.TYPE_CLASS_PHONE};AlertDialog.Builder(this).setTitle("অর্ডার ট্র্যাক করুন").setView(input).setPositiveButton("খুঁজুন"){_,_->lifecycleScope.launch{runCatching{val a=JSONArray(api.rpc("track_orders_by_phone",JSONObject().put("p_phone",input.text.toString())));val msg=(0 until a.length()).joinToString("\n\n"){i->val o=a.getJSONObject(i);"#${o.optString("id").take(8)} · ${o.optString("status")} · ৳${money(o.optDouble("total_amount"))}"};AlertDialog.Builder(this@MainActivity).setMessage(msg.ifBlank{"কোনো অর্ডার পাওয়া যায়নি"}).setPositiveButton("ঠিক আছে",null).show()}.onFailure{toast("ট্র্যাক করা যায়নি: ${it.message}")}}}.setNegativeButton("বাতিল",null).show()}
 
     private fun showProfile(){
-        val loggedIn = api.userId != null
-        if (!loggedIn) {
-            val items = arrayOf("লগইন / রেজিস্ট্রেশন", "আমার সমস্ত অর্ডার", "অর্ডার ট্র্যাক করুন", "রিটার্ন পলিসি", "প্রাইভেসি পলিসি", "আমাদের সম্পর্কে", "ফেসবুক পেজ", "ইউটিউব চ্যানেল", "হটলাইন কল")
-            AlertDialog.Builder(this).setTitle("অতিথি গ্রাহক").setMessage("লগইন না করেও পণ্য দেখা ও অতিথি অর্ডার ট্র্যাক করা যাবে। অ্যাকাউন্টের সুবিধা পেতে লগইন করুন।")
-                .setItems(items){_,which->when(which){0->showAuth();1->showOrders();2->trackByPhone();3->showPolicy("policy_return","রিটার্ন পলিসি");4->showPolicy("policy_privacy","প্রাইভেসি পলিসি");5->showPolicy("policy_about","আমাদের সম্পর্কে");6->openExternal("https://www.facebook.com/profile.php?id=61596001466743");7->openExternal("https://www.youtube.com/@mm-bazaar");8->callHelpline()}}
-                .setNegativeButton("বন্ধ",null).show()
+        if(api.userId==null){
+            profileActions(false)
             return
         }
         lifecycleScope.launch {
             runCatching { val u=api.select("users","select=*&id=eq.${api.userId}"); if(u.length()>0) userData=u.getJSONObject(0) }
             val name=userData.optString("name",api.email?:"আমার অ্যাকাউন্ট")
-            val badge = if(chatUnread) "  • নতুন মেসেজ" else ""
-            val summary = "ইমেইল: ${api.email.orEmpty()}\nমোবাইল: ${userData.optString("phone")}\nঠিকানা: ${userData.optString("address")}\n\nওয়ালেট: ৳${money(userData.optDouble("wallet_balance"))}\nLoyalty Points: ${userData.optInt("loyalty_points")}"
-            val items=arrayOf("প্রোফাইল সম্পাদনা","আমার সমস্ত অর্ডার","অর্ডার ট্র্যাক করুন","কাস্টমার চ্যাট$badge","রিটার্ন পলিসি","প্রাইভেসি পলিসি","আমাদের সম্পর্কে","ফেসবুক পেজ","ইউটিউব চ্যানেল","হটলাইন কল","লগআউট")
-            AlertDialog.Builder(this@MainActivity).setTitle(name).setMessage(summary).setItems(items){_,which->when(which){0->editProfile();1->showOrders();2->trackByPhone();3->openChat();4->showPolicy("policy_return","রিটার্ন পলিসি");5->showPolicy("policy_privacy","প্রাইভেসি পলিসি");6->showPolicy("policy_about","আমাদের সম্পর্কে");7->openExternal("https://www.facebook.com/profile.php?id=61596001466743");8->openExternal("https://www.youtube.com/@mm-bazaar");9->callHelpline();10->lifecycleScope.launch{runCatching{api.signOut();userData=JSONObject();chatUnread=false;b.tvChatBadge.visibility=View.GONE;toast("লগআউট হয়েছে")}.onFailure{toast(it.message?:"লগআউট ব্যর্থ")}}}}
+            AlertDialog.Builder(this@MainActivity).setTitle(name)
+                .setMessage("ইমেইল: ${api.email}\nমোবাইল: ${userData.optString("phone")}\nঠিকানা: ${userData.optString("address")}\n\nওয়ালেট: ৳${money(userData.optDouble("wallet_balance"))}\nLoyalty Points: ${userData.optInt("loyalty_points")}")
+                .setItems(arrayOf("প্রোফাইল সম্পাদনা","আমার অর্ডার","অর্ডার ট্র্যাক করুন","কাস্টমার চ্যাট","রিটার্ন পলিসি","প্রাইভেসি পলিসি","আমাদের সম্পর্কে","ফেসবুক পেজ","ইউটিউব চ্যানেল","হটলাইন কল","লগআউট")){_,which->when(which){0->editProfile();1->showOrders();2->trackByPhone();3->openChat();4->showPolicy("policy_return","রিটার্ন পলিসি");5->showPolicy("policy_privacy","প্রাইভেসি পলিসি");6->showPolicy("policy_about","আমাদের সম্পর্কে");7->openExternal("https://www.facebook.com/profile.php?id=61596001466743");8->openExternal("https://www.youtube.com/@mm-bazaar");9->callHelpline();10->lifecycleScope.launch{runCatching{api.signOut();userData=JSONObject();toast("লগআউট হয়েছে")}.onFailure{toast(it.message?:"লগআউট ব্যর্থ")}}}}
                 .setNegativeButton("বন্ধ",null).show()
         }
     }
-
-    private fun createChatNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel("customer_chat", "কাস্টমার চ্যাট", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "MM BAZAAR সাপোর্টের নতুন মেসেজ" }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-        }
-    }
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7301)
-        }
-    }
-    private fun refreshChatUnread(notify: Boolean) {
-        val uid = api.userId ?: return
-        lifecycleScope.launch {
-            runCatching {
-                val rows = api.select("chats", "select=unread_for_user&id=eq.$uid&limit=1")
-                val unread = rows.length() > 0 && rows.getJSONObject(0).optBoolean("unread_for_user", false)
-                val wasUnread = chatUnread
-                chatUnread = unread
-                b.tvChatBadge.visibility = if (unread) View.VISIBLE else View.GONE
-                if (notify && unread && !wasUnread && activeChatView == null) showChatNotification()
-                if (!unread) chatNotificationShown = false
-            }
-        }
-    }
-    private fun showChatNotification() {
-        if (chatNotificationShown) return
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        val openIntent = Intent(this, MainActivity::class.java).putExtra("open_chat", true)
-        val openApp = PendingIntent.getActivity(this, 7302, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val notification = NotificationCompat.Builder(this, "customer_chat")
-            .setSmallIcon(R.mipmap.ic_launcher).setContentTitle("MM BAZAAR সাপোর্ট")
-            .setContentText("আপনার জন্য নতুন মেসেজ এসেছে")
-            .setContentIntent(openApp).setPriority(NotificationCompat.PRIORITY_DEFAULT).setAutoCancel(true).build()
-        runCatching { NotificationManagerCompat.from(this).notify(7302, notification); chatNotificationShown = true }
-    }
-    private fun markChatRead(uid:String) {
-        lifecycleScope.launch { runCatching { api.update("chats", "id=eq.$uid", JSONObject().put("unread_for_user", false)); chatUnread=false; chatNotificationShown=false; NotificationManagerCompat.from(this@MainActivity).cancel(7302) } }
+    private fun profileActions(loggedIn:Boolean){
+        val items=if(loggedIn) arrayOf("আমার অর্ডার","অর্ডার ট্র্যাক করুন","রিটার্ন পলিসি","প্রাইভেসি পলিসি","আমাদের সম্পর্কে","ফেসবুক পেজ","ইউটিউব চ্যানেল","হটলাইন কল") else arrayOf("লগইন / রেজিস্ট্রেশন","অর্ডার ট্র্যাক করুন","রিটার্ন পলিসি","প্রাইভেসি পলিসি","আমাদের সম্পর্কে","ফেসবুক পেজ","ইউটিউব চ্যানেল","হটলাইন কল")
+        AlertDialog.Builder(this).setTitle("প্রোফাইল").setItems(items){_,which->when(which){0->if(loggedIn)showOrders() else showAuth();1->trackByPhone();2->showPolicy("policy_return","রিটার্ন পলিসি");3->showPolicy("policy_privacy","প্রাইভেসি পলিসি");4->showPolicy("policy_about","আমাদের সম্পর্কে");5->openExternal("https://www.facebook.com/profile.php?id=61596001466743");6->openExternal("https://www.youtube.com/@mm-bazaar");7->callHelpline()}}.show()
     }
     private fun openExternal(url:String){ runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure { toast("লিংক খোলা যায়নি") } }
     private fun callHelpline(){ val phone=settings.optString("phone","01937175424").filter{it.isDigit()}; runCatching { startActivity(Intent(Intent.ACTION_DIAL,Uri.parse("tel:$phone"))) }.onFailure { toast("ফোন অ্যাপ খোলা যায়নি") } }
@@ -532,77 +477,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun editProfile(){val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(20,8,20,0)};val name=EditText(this).apply{hint="নাম";setText(userData.optString("name"))};val phone=EditText(this).apply{hint="মোবাইল";inputType=InputType.TYPE_CLASS_PHONE;setText(userData.optString("phone"))};val address=EditText(this).apply{hint="ঠিকানা";minLines=2;setText(userData.optString("address"))};box.addView(name);box.addView(phone);box.addView(address);val d=AlertDialog.Builder(this).setTitle("প্রোফাইল আপডেট").setView(box).setPositiveButton("সংরক্ষণ",null).setNegativeButton("বাতিল",null).create();d.setOnShowListener{d.getButton(-1).setOnClickListener{val ph=phone.text.toString().filter{it.isDigit()};if(!Regex("^01[3-9][0-9]{8}$").matches(ph)){toast("সঠিক ১১ ডিজিটের ফোন দিন");return@setOnClickListener};lifecycleScope.launch{runCatching{api.update("users","id=eq.${api.userId}",JSONObject().put("name",name.text.toString().trim()).put("phone",ph).put("address",address.text.toString().trim()));userData.put("name",name.text.toString().trim()).put("phone",ph).put("address",address.text.toString().trim());d.dismiss();toast("প্রোফাইল আপডেট হয়েছে")}.onFailure{toast("আপডেট হয়নি: ${it.message}")}}}};d.show()}
     private fun showAuth(){val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(20,8,20,0)};val name=EditText(this).apply{hint="নাম (নতুন অ্যাকাউন্ট)"};val phone=EditText(this).apply{hint="মোবাইল (নতুন অ্যাকাউন্ট)";inputType=InputType.TYPE_CLASS_PHONE};val email=EditText(this).apply{hint="ইমেইল";inputType=33};val pass=EditText(this).apply{hint="পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)";inputType=129};val forgot=TextView(this).apply{text="পাসওয়ার্ড ভুলে গেছেন?";setTextColor(getColor(R.color.gold_dark));setPadding(0,12,0,4);setOnClickListener{val e=email.text.toString().trim();if(e.isBlank())toast("আগে ইমেইল লিখুন")else lifecycleScope.launch{runCatching{api.resetPasswordForEmail(e);toast("পাসওয়ার্ড রিসেট লিংক পাঠানো হয়েছে")}.onFailure{toast(it.message?:"ব্যর্থ")}}}};box.addView(name);box.addView(phone);box.addView(email);box.addView(pass);box.addView(forgot);val d=AlertDialog.Builder(this).setTitle("লগইন / রেজিস্ট্রেশন").setView(box).setPositiveButton("লগইন",null).setNeutralButton("নতুন অ্যাকাউন্ট",null).setNegativeButton("বন্ধ",null).create();d.setOnShowListener{d.getButton(-1).setOnClickListener{doAuth(email.text.toString(),pass.text.toString(),name.text.toString(),phone.text.toString(),false,d)};d.getButton(-3).setOnClickListener{doAuth(email.text.toString(),pass.text.toString(),name.text.toString(),phone.text.toString(),true,d)}};d.show()}
-    private fun doAuth(email:String,password:String,name:String,phone:String,signup:Boolean,d:AlertDialog){lifecycleScope.launch{runCatching{if(signup){if(name.isBlank()||!Regex("^01[3-9][0-9]{8}$").matches(phone.filter{it.isDigit()}))throw IllegalArgumentException("নাম ও সঠিক ১১ ডিজিটের ফোন দিন");if(password.length<6)throw IllegalArgumentException("পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে");api.signUp(email.trim(),password,name.trim(),phone.filter{it.isDigit()})}else api.signIn(email.trim(),password);d.dismiss();refreshUserData();refreshChatUnread(false);toast(if(signup)"অ্যাকাউন্ট তৈরি হয়েছে" else "লগইন সফল");showProfile()}.onFailure{toast(it.message?:"লগইন ব্যর্থ")}}}
-    private fun openReview(p:JSONObject){
-        if(api.userId==null){showAuth();return}
-        val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(20,8,20,0)}
-        val rating=Spinner(this).apply{adapter=spinnerAdapter((1..5).map{"$it ⭐"}.reversed())}
-        val text=EditText(this).apply{hint="আপনার অভিজ্ঞতা লিখুন";minLines=3}
-        box.addView(label("আপনার রেটিং"));box.addView(rating);box.addView(text)
-        AlertDialog.Builder(this).setTitle("পণ্য রিভিউ").setView(box).setPositiveButton("জমা দিন"){_,_->
-            val value=rating.selectedItemPosition.let{(5-it).coerceIn(1,5)}
-            if(text.text.toString().trim().isBlank()){toast("আপনার মন্তব্য লিখুন");return@setPositiveButton}
-            lifecycleScope.launch{runCatching{api.rpc("submit_review_atomic",JSONObject().put("p_product_id",p.optString("id")).put("p_user_name",userData.optString("name","গ্রাহক")).put("p_rating",value).put("p_text",text.text.toString().trim()));toast("রিভিউ জমা হয়েছে");loadStore()}.onFailure{toast("রিভিউ হয়নি: ${it.message}")}}
-        }.setNegativeButton("বাতিল",null).show()
-    }
-    private fun renderProductReviews(productId:String, target:LinearLayout) {
-        lifecycleScope.launch {
-            runCatching {
-                val rows=api.select("reviews","select=*&product_id=eq.${Uri.encode(productId)}&order=created_at.desc&limit=30")
-                target.removeAllViews()
-                target.addView(label("গ্রাহকদের রিভিউ (${rows.length()})"))
-                if(rows.length()==0){target.addView(TextView(this@MainActivity).apply{text="এখনো কোনো রিভিউ নেই";setPadding(0,8,0,8);setTextColor(getColor(R.color.text_secondary))});return@runCatching}
-                for(i in 0 until rows.length()) {
-                    val r=rows.getJSONObject(i)
-                    val card=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.VERTICAL;setPadding(12,10,12,10);background=getDrawable(R.drawable.bg_card);layoutParams=LinearLayout.LayoutParams(-1,-2).apply{setMargins(0,6,0,6)}}
-                    card.addView(TextView(this@MainActivity).apply{text=r.optString("user_name").ifBlank{"গ্রাহক"};textSize=14f;setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(getColor(R.color.text_main))})
-                    card.addView(TextView(this@MainActivity).apply{text="${"★".repeat(r.optInt("rating").coerceIn(0,5))}${"☆".repeat(5-r.optInt("rating").coerceIn(0,5))}";textSize=15f;setTextColor(getColor(R.color.gold_dark))})
-                    card.addView(TextView(this@MainActivity).apply{text=r.optString("created_at").replace("T"," ").take(16);textSize=10f;setTextColor(getColor(R.color.text_secondary))})
-                    card.addView(TextView(this@MainActivity).apply{text=r.optString("text");textSize=13f;setPadding(0,4,0,4);setTextColor(getColor(R.color.text_main))})
-                    val reply=r.optString("reply").trim()
-                    if(reply.isNotBlank()) card.addView(TextView(this@MainActivity).apply{text="দোকানের উত্তর\n$reply";textSize=12f;setPadding(10,8,8,8);setTextColor(getColor(R.color.text_secondary));background=getDrawable(R.drawable.bg_card)})
-                    target.addView(card)
-                }
-            }.onFailure { target.addView(TextView(this@MainActivity).apply{text="রিভিউ লোড করা যায়নি: ${it.message}"}) }
-        }
-    }
-    private fun openChat(){
-        val uid=api.userId
-        if(uid==null){showAuth();return}
-        val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,8,14,4)}
-        val messages=TextView(this).apply{setTextColor(getColor(R.color.text_main));text="মেসেজ লোড হচ্ছে…";textSize=14f;setPadding(8,8,8,8)}
-        val scroll=ScrollView(this).apply{layoutParams=LinearLayout.LayoutParams(-1,(260*resources.displayMetrics.density).toInt());addView(messages)}
-        val input=EditText(this).apply{hint="মেসেজ লিখুন";maxLines=3}
-        box.addView(scroll);box.addView(input)
-        val d=AlertDialog.Builder(this).setTitle("কাস্টমার সাপোর্ট").setView(box).setPositiveButton("পাঠান",null).setNegativeButton("বন্ধ",null).create()
-        d.setOnShowListener {
-            d.getButton(-1).setOnClickListener {
-                val msg=input.text.toString().trim(); if(msg.isBlank())return@setOnClickListener
-                lifecycleScope.launch { runCatching {
-                    val now=nowIso()
-                    api.upsert("chats",JSONObject().put("id",uid).put("user_id",uid).put("user_name",userData.optString("name",api.email)).put("phone",userData.optString("phone")).put("email",api.email).put("last_message",msg).put("unread_for_admin",true).put("unread_for_user",false).put("updated_at",now))
-                    api.insert("chat_messages",JSONObject().put("chat_id",uid).put("sender_id",uid).put("text",msg).put("timestamp",now))
-                    input.text.clear();loadChat(uid,messages);scroll.post{scroll.fullScroll(View.FOCUS_DOWN)}
-                }.onFailure{toast("মেসেজ পাঠানো যায়নি: ${it.message}")}}
-            }
-        }
-        d.setOnDismissListener { activeChatView=null }
-        d.show();activeChatView=messages;markChatRead(uid);loadChat(uid,messages)
-    }
-    private fun loadChat(uid:String,target:TextView){
-        lifecycleScope.launch{runCatching{
-            val a=api.select("chat_messages","select=*&chat_id=eq.$uid&order=timestamp.asc")
-            target.text=(0 until a.length()).joinToString("\n\n"){i->val m=a.getJSONObject(i);val mine=m.optString("sender_id")==uid;(if(mine)"আপনি" else "সাপোর্ট")+"  ·  "+m.optString("timestamp").replace("T"," ").take(16)+"\n"+m.optString("text")}.ifBlank{"এখনো কোনো মেসেজ নেই"}
-        }.onFailure{target.text="চ্যাট লোড করা যায়নি: ${it.message}"}}
-    }
-    private fun label(value:String)=TextView(this).apply { text=value; textSize=13f; setTextColor(getColor(R.color.text_main)); setPadding(0,10,0,4) }
-    private fun spinnerAdapter(items:List<String>):ArrayAdapter<String> = ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-    private fun spinnerListener(onSelected:()->Unit)=object:AdapterView.OnItemSelectedListener {
-        override fun onNothingSelected(parent:AdapterView<*>?) {}
-        override fun onItemSelected(parent:AdapterView<*>?, view:View?, position:Int, id:Long) { onSelected() }
-    }
-    private fun stringArray(array:JSONArray?):List<String> = if(array==null) emptyList() else (0 until array.length()).mapNotNull { i -> array.optString(i).takeIf { it.isNotBlank() && it!="null" } }
-    private fun money(value:Double):String = String.format(Locale.US,"%,.0f",value)
-    private fun nowIso():String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.US).apply { timeZone=java.util.TimeZone.getTimeZone("UTC") }.format(Date())
+    private fun doAuth(email:String,password:String,name:String,phone:String,signup:Boolean,d:AlertDialog){lifecycleScope.launch{runCatching{if(signup){if(name.isBlank()||!Regex("^01[3-9][0-9]{8}$").matches(phone.filter{it.isDigit()}))throw IllegalArgumentException("নাম ও সঠিক ১১ ডিজিটের ফোন দিন");if(password.length<6)throw IllegalArgumentException("পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে");api.signUp(email.trim(),password,name.trim(),phone.filter{it.isDigit()})}else api.signIn(email.trim(),password);d.dismiss();refreshUserData();toast(if(signup)"অ্যাকাউন্ট তৈরি হয়েছে" else "লগইন সফল");showProfile()}.onFailure{toast(it.message?:"লগইন ব্যর্থ")}}}
+    private fun openReview(p:JSONObject){if(api.userId==null){showAuth();return};val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(20,8,20,0)};val rating=EditText(this).apply{hint="রেটিং ১-৫";inputType=2;setText("5")};val text=EditText(this).apply{hint="আপনার মন্তব্য";minLines=3};box.addView(rating);box.addView(text);AlertDialog.Builder(this).setTitle("রিভিউ লিখুন").setView(box).setPositiveButton("জমা দিন"){_,_->lifecycleScope.launch{runCatching{api.rpc("submit_review_atomic",JSONObject().put("p_product_id",p.optString("id")).put("p_user_name",userData.optString("name","গ্রাহক")).put("p_rating",rating.text.toString().toDoubleOrNull()?.coerceIn(1.0,5.0)?:5.0).put("p_text",text.text.toString()));toast("রিভিউ জমা হয়েছে")}.onFailure{toast("রিভিউ হয়নি: ${it.message}")}}}.setNegativeButton("বাতিল",null).show()}
+    private fun openChat(){if(api.userId==null){showAuth();return};val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(16,8,16,0)};val messages=TextView(this).apply{minHeight=180;setTextColor(getColor(R.color.text_main));text="চ্যাট লোড হচ্ছে…"};val input=EditText(this).apply{hint="মেসেজ লিখুন"};box.addView(ScrollView(this).apply{addView(messages)});box.addView(input);val d=AlertDialog.Builder(this).setTitle("কাস্টমার সাপোর্ট").setView(box).setPositiveButton("পাঠান",null).setNegativeButton("বন্ধ",null).create();d.setOnShowListener{d.getButton(-1).setOnClickListener{val msg=input.text.toString().trim();if(msg.isNotBlank())lifecycleScope.launch{runCatching{val uid=api.userId!!;val now=nowIso();api.upsert("chats",JSONObject().put("id",uid).put("user_id",uid).put("user_name",userData.optString("name",api.email)).put("phone",userData.optString("phone")).put("email",api.email).put("last_message",msg).put("unread_for_admin",true).put("unread_for_user",false).put("updated_at",now));api.insert("chat_messages",JSONObject().put("chat_id",uid).put("sender_id",uid).put("text",msg).put("timestamp",now));input.text.clear();loadChat(uid,messages)}.onFailure{toast("মেসেজ পাঠানো যায়নি: ${it.message}")}}}};d.setOnDismissListener { activeChatView=null }; d.show(); activeChatView=messages; loadChat(api.userId!!,messages)}
+    private fun loadChat(uid:String,target:TextView){lifecycleScope.launch{runCatching{val a=api.select("chat_messages","select=*&chat_id=eq.$uid&order=timestamp.asc");target.text=(0 until a.length()).joinToString("\n\n"){i->val m=a.getJSONObject(i);(if(m.optString("sender_id")==uid)"আপনি: " else "সাপোর্ট: ")+m.optString("text")}.ifBlank{"এখনো কোনো মেসেজ নেই"}}}}
+
+    private fun stringArray(a:JSONArray?):List<String> = if(a==null) emptyList() else (0 until a.length()).map{a.optString(it)}.filter{it.isNotBlank()}
+    private fun spinnerAdapter(items:List<String>)=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,items)
+    private fun label(s:String)=TextView(this).apply{text=s;textSize=13f;setTextColor(getColor(R.color.text_secondary));setPadding(0,8,0,2)}
+    private fun money(n:Double)=String.format(Locale.US,"%,.0f",n)
+    private fun nowIso()=SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.US).format(Date())
+    private fun spinnerListener(action:()->Unit)=object:AdapterView.OnItemSelectedListener{override fun onNothingSelected(parent:AdapterView<*>?){};override fun onItemSelected(parent:AdapterView<*>?,view:View?,position:Int,id:Long)=action()}
     private fun toast(s:String)=Toast.makeText(this,s,Toast.LENGTH_LONG).show()
 }
