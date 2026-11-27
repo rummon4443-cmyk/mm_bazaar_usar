@@ -1,2 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<TextView xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/tvCategory" android:layout_width="wrap_content" android:layout_height="48dp" android:layout_margin="5dp" android:paddingHorizontal="15dp" android:gravity="center" android:background="@drawable/bg_card" android:text="সব" android:textColor="@color/text_main" android:textStyle="bold" android:textSize="12sp"/>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="76dp" android:layout_height="72dp" android:layout_margin="4dp"
+    android:orientation="vertical" android:gravity="center" android:padding="5dp" android:background="@drawable/bg_card">
+    <ImageView android:id="@+id/ivCategory" android:layout_width="34dp" android:layout_height="34dp"
+        android:scaleType="centerCrop" android:contentDescription="ক্যাটাগরির ছবি" android:visibility="gone"/>
+    <TextView android:id="@+id/tvCategory" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center" android:maxLines="2" android:ellipsize="end" android:text="সব"
+        android:textColor="@color/text_main" android:textStyle="bold" android:textSize="10sp" android:paddingTop="3dp"/>
+</LinearLayout>

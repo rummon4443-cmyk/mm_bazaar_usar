@@ -5,7 +5,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.speech.RecognizerIntent
 import android.text.InputType
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -13,6 +15,7 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.snackbar.Snackbar
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -32,6 +35,7 @@ import kotlin.math.roundToInt
 
 /** Fully native Kotlin/XML customer UI. No WebView is used. */
 class MainActivity : AppCompatActivity() {
+    companion object { private const val VOICE_SEARCH_REQUEST = 731 }
     private lateinit var b: ActivityMainBinding
     private lateinit var api: Supabase
     private val products = mutableListOf<JSONObject>()
@@ -72,6 +76,24 @@ class MainActivity : AppCompatActivity() {
     private val searchHandler = Handler(Looper.getMainLooper())
     private val flashHandler = Handler(Looper.getMainLooper())
     private var pendingSearchSave: Runnable? = null
+    private val smartSearchSynonyms = listOf(
+        listOf("ঘড়ি", "ঘড়ি", "watch", "watches", "smartwatch", "clock", "timepiece"),
+        listOf("জুতা", "স্যান্ডেল", "স্নিকার", "shoe", "shoes", "sandal", "sandals", "sneaker", "footwear", "boot", "loafer"),
+        listOf("চশমা", "সানগ্লাস", "glass", "glasses", "sunglass", "sunglasses", "eyewear"),
+        listOf("পারফিউম", "সুগন্ধি", "আতর", "বডি স্প্রে", "perfume", "perfumes", "fragrance", "attar", "spray", "cologne"),
+        listOf("ব্যাগ", "মানিব্যাগ", "পার্স", "ব্যাকপ্যাক", "bag", "bags", "purse", "backpack", "wallet", "handbag"),
+        listOf("জামা", "শার্ট", "টিশার্ট", "টি-শার্ট", "গেঞ্জি", "প্যান্ট", "পাঞ্জাবি", "shirt", "t-shirt", "tshirt", "polo", "pant", "pants", "panjabi", "jeans", "men", "mens"),
+        listOf("শাড়ি", "শাড়ী", "শাড়ি", "থ্রি পিস", "বোরকা", "হিজাব", "কুর্তি", "মহিলা", "মেয়ে", "মেয়ে", "women", "womens", "lady", "ladies", "saree", "kurti", "borka", "hijab", "dress"),
+        listOf("বিউটি", "ক্রিম", "ত্বক", "মেকআপ", "লিপস্টিক", "ফেসওয়াশ", "beauty", "skin", "skincare", "cream", "serum", "cosmetic", "cosmetics", "makeup", "facewash"),
+        listOf("গয়না", "গয়না", "গহনা", "আংটি", "চুড়ি", "চুরি", "নেকলেস", "jewel", "jewelry", "jewellery", "gold", "ring", "necklace", "bangle", "earring"),
+        listOf("মোবাইল", "ফোন", "ইলেকট্রনিক্স", "হেডফোন", "এয়ারবাড", "চার্জার", "mobile", "phone", "electronic", "electronics", "gadget", "gadgets", "headphone", "earbuds", "airpods", "charger", "speaker"),
+        listOf("খেলনা", "বাচ্চা", "toy", "toys", "kid", "kids", "baby"),
+        listOf("খাতা", "বই", "কলম", "স্টেশনারি", "stationery", "book", "books", "pen", "notebook"),
+        listOf("রান্না", "কিচেন", "বোতল", "ফ্লাস্ক", "kitchen", "cook", "cookware", "utensil", "bottle", "flask", "blender"),
+        listOf("ঘর", "হোম", "লাইট", "ল্যাম্প", "চাদর", "home", "living", "decor", "furniture", "lamp", "bedsheet"),
+        listOf("খাবার", "ফুড", "গ্রোসারি", "food", "grocery", "snack", "honey", "tea"),
+        listOf("ব্যায়াম", "ব্যায়াম", "স্বাস্থ্য", "ফিটনেস", "health", "fitness", "gym")
+    )
     private val flashTicker = object : Runnable { override fun run() { updateFlashCountdown(); if (!isFinishing) flashHandler.postDelayed(this, 1000L) } }
     private val refreshFallback = object : Runnable { override fun run() { if (!isFinishing) { loadStore(); refreshHandler.postDelayed(this, 60_000L) } } }
 
@@ -80,9 +102,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         api = Supabase(this); restoreLocal()
-        productAdapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) })
+        productAdapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) }, ::buyNow, { toggles.optBoolean("f_s_wishlist", true) })
         categoryAdapter = CategoryAdapter(mutableListOf(), ::filterCategory)
-        flashAdapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) })
+        flashAdapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) }, ::buyNow, { toggles.optBoolean("f_s_wishlist", true) })
         b.rvFlash.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false); b.rvFlash.adapter = flashAdapter
         b.rvProducts.layoutManager = GridLayoutManager(this, 2); b.rvProducts.adapter = productAdapter
         b.rvCategories.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false); b.rvCategories.adapter = categoryAdapter
@@ -97,14 +119,18 @@ class MainActivity : AppCompatActivity() {
                     pendingSearchSave = Runnable { saveRecentSearch(term) }
                     searchHandler.postDelayed(pendingSearchSave!!, 1200L)
                 }
+                b.tvSearchClear.visibility = if (term.isBlank()) View.GONE else View.VISIBLE
                 if (term.isBlank()) renderSearchHistory()
             }
         })
         b.etSearch.setOnFocusChangeListener { _, focused -> if (focused && b.etSearch.text.isNullOrBlank()) renderSearchHistory() }
+        b.tvSearchClear.setOnClickListener { b.etSearch.text?.clear(); b.etSearch.requestFocus(); renderSearchHistory() }
+        b.tvVoiceSearch.setOnClickListener { startVoiceSearch() }
         b.btnScrollTop.setOnClickListener { b.mainScroll.smoothScrollTo(0, 0) }
         b.mainScroll.setOnScrollChangeListener { _, _, y, _, _ -> b.btnScrollTop.visibility = if (y > 320) View.VISIBLE else View.GONE }
         renderSearchHistory()
         b.tvAccount.setOnClickListener { showProfile() }
+        b.tvStoreName.setOnClickListener { categoryFilter = "all"; b.tvProductHeading.text = "সকল পণ্য"; applyFilter() }
         b.tvHeaderChat.setOnClickListener { openChat() }
         b.tvHeaderWhatsApp.setOnClickListener { openStoreWhatsApp() }
         b.tvHeaderCart.setOnClickListener { showCart() }
@@ -119,6 +145,29 @@ class MainActivity : AppCompatActivity() {
         b.navProfile.setOnClickListener { showProfile() }
         updateHeaderCartCount()
         loadStore()
+    }
+
+    private fun startVoiceSearch() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "bn-BD")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "bn-BD")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "পণ্যের নাম বলুন")
+        }
+        runCatching { startActivityForResult(intent, VOICE_SEARCH_REQUEST) }
+            .onFailure { toast("এই ফোনে ভয়েস সার্চ চালু করা যাচ্ছে না") }
+    }
+
+    @Deprecated("Deprecated by Android, retained for broad device compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == VOICE_SEARCH_REQUEST && resultCode == RESULT_OK) {
+            val spoken = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
+            if (spoken.isNotBlank()) {
+                b.etSearch.setText(spoken)
+                b.etSearch.setSelection(spoken.length)
+            } else toast("কথা বোঝা যায়নি")
+        }
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); initialDeepLinkHandled=true; handleDeepLink(intent) }
@@ -144,6 +193,7 @@ class MainActivity : AppCompatActivity() {
         if (!::b.isInitialized) return
         val count = cart.values.sumOf { it.qty }
         b.tvHeaderCart.text = "🛒 $count"
+        b.navWishlist.text = "♡\nপছন্দ (${wishlist.size})"
     }
 
     private fun openStoreWhatsApp() {
@@ -168,15 +218,49 @@ class MainActivity : AppCompatActivity() {
             updateFlashCountdown()
             b.tvNotice.visibility=if(toggles.optBoolean("f_s_marquee_notice",true)) View.VISIBLE else View.GONE
             b.tvNotice.text=if(settings.optBoolean("maintenance",false)) "দোকানটি সাময়িক রক্ষণাবেক্ষণে আছে" else settings.optString("marquee", "MM BAZAAR — আপনার বিশ্বস্ত অনলাইন শপ")
+            b.tvNotice.isSingleLine = true
+            b.tvNotice.ellipsize = TextUtils.TruncateAt.MARQUEE
+            b.tvNotice.marqueeRepeatLimit = -1
+            b.tvNotice.isSelected = true
             renderOffers()
             renderRecentlyViewed()
             b.tvStoreName.text = settings.optString("store_name", "MM BAZAAR").ifBlank { "MM BAZAAR" }
+            b.tvStoreTagline.text = settings.optString("tagline").ifBlank { settings.optString("store_tagline").ifBlank { "আপনার বিশ্বস্ত শপ" } }
             val bannersOn=toggles.optBoolean("f_s_banners",true) && banners.isNotEmpty()
             b.ivBanner.visibility=if(bannersOn) View.VISIBLE else View.GONE
             b.tvBanner.visibility=if(bannersOn) View.VISIBLE else View.GONE
             b.bannerDots.visibility=if(bannersOn && banners.size > 1) View.VISIBLE else View.GONE
             b.tvBanner.text=banners.firstOrNull()?.optString("title")?.ifBlank { settings.optString("store_name","MM BAZAAR") } ?: settings.optString("store_name","MM BAZAAR")
-            if(bannersOn) { bannerIndex = 0; showCurrentBanner(); bannerSlideHandler.removeCallbacks(bannerSlideRunnable); bannerSlideHandler.postDelayed(bannerSlideRunnable, 4500L); b.ivBanner.setOnClickListener { banners.getOrNull(bannerIndex)?.optString("link_url")?.takeIf { it.startsWith("http") }?.let { url -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } } } else { bannerSlideHandler.removeCallbacks(bannerSlideRunnable) }
+            if(bannersOn) {
+                bannerIndex = 0
+                showCurrentBanner()
+                bannerSlideHandler.removeCallbacks(bannerSlideRunnable)
+                bannerSlideHandler.postDelayed(bannerSlideRunnable, 4500L)
+                b.ivBanner.isClickable = false
+                b.tvBanner.isClickable = false
+                var bannerDownX = 0f
+                b.bannerFrame.setOnTouchListener { _, event ->
+                    when (event.action) {
+                        MotionEvent.ACTION_DOWN -> { bannerDownX = event.x; true }
+                        MotionEvent.ACTION_UP -> {
+                            val delta = event.x - bannerDownX
+                            if (kotlin.math.abs(delta) > 45 && banners.size > 1) {
+                                bannerIndex = (bannerIndex + (if (delta < 0) 1 else -1) + banners.size) % banners.size
+                                showCurrentBanner()
+                            } else {
+                                val url = banners.getOrNull(bannerIndex)?.optString("link_url").orEmpty()
+                                if (url.startsWith("http")) runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                                    .onFailure { toast("ব্যানারের লিংক খোলা যায়নি") }
+                            }
+                            true
+                        }
+                        else -> true
+                    }
+                }
+            } else {
+                bannerSlideHandler.removeCallbacks(bannerSlideRunnable)
+                b.bannerFrame.setOnTouchListener(null)
+            }
             if(api.userId!=null) { refreshUserData(); refreshChatBadge() } else { b.tvHeaderChat.text="💬" }
             applyFilter()
             if (!initialDeepLinkHandled) { initialDeepLinkHandled = true; handleDeepLink(intent) }
@@ -190,9 +274,8 @@ class MainActivity : AppCompatActivity() {
             if (maintenanceDialog?.isShowing != true && !isFinishing) {
                 maintenanceDialog = AlertDialog.Builder(this)
                     .setTitle("দোকান সাময়িক বন্ধ")
-                    .setMessage("দোকানটি বর্তমানে রক্ষণাবেক্ষণে আছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।")
+                    .setMessage("দোকানটি বর্তমানে রক্ষণাবেক্ষণে আছে। Admin চালু না করা পর্যন্ত অ্যাপ ব্যবহার করা যাবে না।")
                     .setCancelable(false)
-                    .setPositiveButton("ঠিক আছে", null)
                     .create().also { dialog -> dialog.setOnDismissListener { maintenanceDialog = null }; dialog.show() }
             }
         } else {
@@ -313,13 +396,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun smartSearchTokens(raw: String): List<String> {
+        val normalized = raw.lowercase(Locale.ROOT).trim().normalizeNfc()
+        if (normalized.isBlank()) return emptyList()
+        val tokens = linkedSetOf(normalized)
+        smartSearchSynonyms.forEach { group ->
+            val normalizedGroup = group.map { it.normalizeNfc() }
+            if (normalizedGroup.any { it.contains(normalized) || (normalized.length >= 2 && normalized.contains(it)) }) tokens.addAll(normalizedGroup)
+        }
+        return tokens.toList()
+    }
+
+    private fun String.normalizeNfc(): String = java.text.Normalizer.normalize(this, java.text.Normalizer.Form.NFC)
+
     private fun applyFilter(resetPage: Boolean = true) {
-        val q=b.etSearch.text?.toString()?.trim()?.lowercase().orEmpty()
+        val q=b.etSearch.text?.toString()?.trim().orEmpty()
+        val tokens=smartSearchTokens(q)
         val list=products.filter { p ->
             val cat=categories.firstOrNull { it.optString("id")==p.optString("category_id") }?.optString("name").orEmpty()
             val price=p.optDouble("price")
+            val haystack=listOf(p.optString("title"),p.optString("brand"),p.optString("description"),cat,p.optString("price")).joinToString(" ").lowercase(Locale.ROOT).normalizeNfc()
             (categoryFilter=="all" || p.optString("category_id")==categoryFilter) &&
-                (q.isBlank() || listOf(p.optString("title"),p.optString("brand"),p.optString("description"),cat,p.optString("price")).any{it.lowercase().contains(q)}) &&
+                (tokens.isEmpty() || tokens.any { haystack.contains(it) }) &&
                 price>=minPrice && price<=maxPrice && (!onlyInStock || availableStock(p,"","")>0)
         }.toMutableList()
         when(sortMode){"price_asc"->list.sortBy{it.optDouble("price")};"price_desc"->list.sortByDescending{it.optDouble("price")};else->list.sortByDescending{it.optString("created_at")}}
@@ -327,6 +425,7 @@ class MainActivity : AppCompatActivity() {
         if (resetPage) productDisplayLimit = productPageSize
         productAdapter.replace(filteredProducts.take(productDisplayLimit))
         b.tvProductCount.text="${list.size} টি পণ্য"
+        b.tvEmpty.text = "কোনো পণ্য পাওয়া যায়নি"
         b.tvEmpty.visibility=if(list.isEmpty()) View.VISIBLE else View.GONE
         b.btnLoadMore.visibility=if(filteredProducts.size>productDisplayLimit) View.VISIBLE else View.GONE
         b.btnLoadMore.text="আরও পণ্য দেখুন (${(filteredProducts.size-productDisplayLimit).coerceAtLeast(0)} বাকি)"
@@ -387,7 +486,7 @@ class MainActivity : AppCompatActivity() {
             isNestedScrollingEnabled = false
         }
         val adapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish,
-            { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) })
+            { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) }, ::buyNow, { toggles.optBoolean("f_s_wishlist", true) })
         list.adapter = adapter
 
         fun refreshPreview() {
@@ -473,12 +572,32 @@ class MainActivity : AppCompatActivity() {
         saveLocal(); toast("কার্টে যোগ হয়েছে")
     }
     private fun quickAdd(p:JSONObject) {
-        val hasSizes = toggles.optBoolean("f_p_size", true) && stringArray(p.optJSONArray("sizes")).isNotEmpty()
-        val hasColors = toggles.optBoolean("f_p_color", true) && stringArray(p.optJSONArray("colors")).isNotEmpty()
-        if (hasSizes || hasColors) showProduct(p) else addLine(p, "", "")
+        val size = if (toggles.optBoolean("f_p_size", true)) stringArray(p.optJSONArray("sizes")).firstOrNull().orEmpty() else ""
+        val color = if (toggles.optBoolean("f_p_color", true)) stringArray(p.optJSONArray("colors")).firstOrNull().orEmpty() else ""
+        addLine(p, size, color)
+    }
+    private fun buyNow(p: JSONObject) {
+        if (settings.optBoolean("maintenance", false)) { toast("দোকানটি সাময়িক রক্ষণাবেক্ষণে আছে"); return }
+        val size = if (toggles.optBoolean("f_p_size", true)) stringArray(p.optJSONArray("sizes")).firstOrNull().orEmpty() else ""
+        val color = if (toggles.optBoolean("f_p_color", true)) stringArray(p.optJSONArray("colors")).firstOrNull().orEmpty() else ""
+        val key = cartKey(p.optString("id"), size, color)
+        val before = cart[key]?.qty ?: 0
+        addLine(p, size, color)
+        if ((cart[key]?.qty ?: 0) > before) showCheckout()
     }
     private fun toggleWish(p:JSONObject) { if(!toggles.optBoolean("f_s_wishlist",true)){toast("পছন্দের তালিকা Admin থেকে বন্ধ রাখা হয়েছে");return}; val id=p.optString("id"); if(!wishlist.add(id)) wishlist.remove(id); saveLocal(); toast(if(wishlist.contains(id)) "পছন্দের তালিকায় যোগ হয়েছে" else "পছন্দের তালিকা থেকে সরানো হয়েছে") }
-    private fun showWishlist() { val rows=products.filter{wishlist.contains(it.optString("id"))}; filteredProducts=rows; productDisplayLimit=rows.size; productAdapter.replace(rows); b.btnLoadMore.visibility=View.GONE; b.tvProductHeading.text="পছন্দের তালিকা"; b.tvProductCount.text="${wishlist.size} টি পণ্য"; b.tvEmpty.visibility=if(wishlist.isEmpty()) View.VISIBLE else View.GONE }
+    private fun showWishlist() {
+        if (!toggles.optBoolean("f_s_wishlist", true)) { toast("পছন্দের তালিকা Admin থেকে বন্ধ রাখা হয়েছে"); return }
+        val rows = products.filter { wishlist.contains(it.optString("id")) }
+        filteredProducts = rows
+        productDisplayLimit = rows.size
+        productAdapter.replace(rows)
+        b.btnLoadMore.visibility = View.GONE
+        b.tvProductHeading.text = "পছন্দের তালিকা"
+        b.tvProductCount.text = "${wishlist.size} টি পণ্য"
+        b.tvEmpty.text = "আপনার পছন্দের তালিকা খালি"
+        b.tvEmpty.visibility = if (wishlist.isEmpty()) View.VISIBLE else View.GONE
+    }
 
     private fun showProduct(p:JSONObject) {
         val recent = runCatching { JSONArray(prefs.getString("recent_products", "[]")) }.getOrElse { JSONArray() }
@@ -519,8 +638,28 @@ class MainActivity : AppCompatActivity() {
         if (cart.isEmpty()) { AlertDialog.Builder(this).setMessage("আপনার কার্ট খালি।").setPositiveButton("শপিং করুন") { _, _ -> b.mainScroll.smoothScrollTo(0,0) }.setNegativeButton("বন্ধ",null).show(); return }
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(16,8,16,8) }
         val rowsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var checkoutButton: Button? = null
+        fun updateCheckoutAvailability() {
+            val minimum = settings.optDouble("min_order", 0.0)
+            checkoutButton?.apply {
+                isEnabled = cart.isEmpty() || subtotal() >= minimum
+                text = when {
+                    cart.isEmpty() -> "শপিং করুন"
+                    isEnabled -> "চেকআউট"
+                    else -> "ন্যূনতম ৳${money(minimum)} অর্ডার করুন"
+                }
+            }
+        }
         fun redraw() {
             rowsContainer.removeAllViews()
+            if (cart.isEmpty()) {
+                rowsContainer.addView(TextView(this).apply {
+                    text = "আপনার কার্ট খালি। পছন্দের পণ্য খুঁজে শপিং শুরু করুন।"
+                    gravity = Gravity.CENTER
+                    setPadding(18, 28, 18, 28)
+                    setTextColor(getColor(R.color.text_secondary))
+                })
+            }
             cart.values.toList().forEach { line ->
                 val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(8,8,8,8); background = getDrawable(R.drawable.bg_card) }
                 val image = ImageView(this).apply { layoutParams = LinearLayout.LayoutParams(64,64); scaleType = ImageView.ScaleType.CENTER_CROP; load(line.product.optString("image_url")) }
@@ -533,9 +672,25 @@ class MainActivity : AppCompatActivity() {
                 val del = TextView(this).apply { text = "✕"; setTextColor(getColor(R.color.danger)); setPadding(10,12,8,12); setOnClickListener { cart.remove(cartKey(line.product.optString("id"),line.size,line.color)); saveLocal(); redraw() } }
                 row.addView(image); row.addView(info); row.addView(controls); row.addView(del)
                 var downX = 0f; var downY = 0f
-                info.setOnTouchListener { _, event -> when(event.action) { MotionEvent.ACTION_DOWN -> { downX=event.rawX; downY=event.rawY; true }; MotionEvent.ACTION_UP -> { val dx=event.rawX-downX; val dy=event.rawY-downY; if(dx < -85 && kotlin.math.abs(dx)>kotlin.math.abs(dy)){ cart.remove(cartKey(line.product.optString("id"),line.size,line.color)); saveLocal(); redraw() }; true }; else -> true } }
+                info.setOnTouchListener { _, event -> when(event.action) {
+                    MotionEvent.ACTION_DOWN -> { downX=event.rawX; downY=event.rawY; true }
+                    MotionEvent.ACTION_UP -> {
+                        val dx=event.rawX-downX; val dy=event.rawY-downY
+                        if(dx < -85 && kotlin.math.abs(dx)>kotlin.math.abs(dy)) {
+                            val key = cartKey(line.product.optString("id"),line.size,line.color)
+                            val removed = cart.remove(key)
+                            saveLocal(); redraw()
+                            Snackbar.make(box, "পণ্যটি সরানো হয়েছে", Snackbar.LENGTH_LONG)
+                                .setAction("আনডু") { if (removed != null) { cart[key] = removed; saveLocal(); redraw() } }
+                                .show()
+                        }
+                        true
+                    }
+                    else -> true
+                } }
                 rowsContainer.addView(row); rowsContainer.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(-1,8) })
             }
+            updateCheckoutAvailability()
         }
         box.addView(rowsContainer)
         val couponInput = EditText(this).apply { hint = "কুপন কোড"; setSingleLine(true); inputType = InputType.TYPE_CLASS_TEXT; setText(appliedCoupon) }
@@ -579,7 +734,21 @@ class MainActivity : AppCompatActivity() {
         }
         remove.setOnClickListener { appliedCoupon=""; discountPreview=0.0; couponInput.text.clear(); updateSummary(); toast("কুপন সরানো হয়েছে") }
         redraw(); updateSummary()
-        AlertDialog.Builder(this).setTitle("আপনার কার্ট (${cart.size})").setView(ScrollView(this).apply { addView(box) }).setPositiveButton("চেকআউট"){_,_->showCheckout()}.setNegativeButton("বন্ধ",null).show()
+        val cartDialog = AlertDialog.Builder(this).setTitle("আপনার কার্ট (${cart.values.sumOf { it.qty }})").setView(ScrollView(this).apply { addView(box) }).setPositiveButton("চেকআউট", null).setNegativeButton("বন্ধ",null).create()
+        cartDialog.setOnShowListener {
+            checkoutButton = cartDialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            updateCheckoutAvailability()
+            checkoutButton?.setOnClickListener {
+                if (cart.isEmpty()) {
+                    cartDialog.dismiss()
+                    b.mainScroll.smoothScrollTo(0, 0)
+                } else if (subtotal() >= settings.optDouble("min_order", 0.0)) {
+                    cartDialog.dismiss()
+                    showCheckout()
+                }
+            }
+        }
+        cartDialog.show()
     }
     private fun subtotal()=cart.values.sumOf{it.product.optDouble("price")*it.qty}
     private fun couponDiscount(code:String, sub:Double, c:JSONObject):Double { var d=if(c.optString("type")=="percent") (sub*c.optDouble("value")/100.0).roundToInt().toDouble() else c.optDouble("value"); if(c.has("max_discount")&&!c.isNull("max_discount")) d=minOf(d,c.optDouble("max_discount")); return d.coerceIn(0.0,sub) }
@@ -649,7 +818,11 @@ class MainActivity : AppCompatActivity() {
             val items=JSONArray();cart.values.forEach{items.put(JSONObject().put("id",it.product.optString("id")).put("qty",it.qty).put("selectedSize",it.size).put("selectedColor",it.color))}
             val payload=JSONObject().put("p_customer_name",name).put("p_phone",phone).put("p_address",address).put("p_notes",notes).put("p_delivery_zone",zone).put("p_delivery_charge",del).put("p_tax",tax).put("p_wallet_used",walletUsed).put("p_payment_method",method).put("p_trx_id",trx).put("p_coupon_code",couponCode).put("p_items",items)
             val result=api.rpc("place_order_atomic",payload);val orderId=result.trim().trim('"')
-            if(api.userId==null&&orderId.isNotBlank())guestOrderIds.add(orderId)
+            if (api.userId == null && orderId.isNotBlank()) {
+                guestOrderIds.remove(orderId)
+                guestOrderIds.add(0, orderId)
+                while (guestOrderIds.size > 15) guestOrderIds.removeAt(guestOrderIds.lastIndex)
+            }
             cart.clear();appliedCoupon="";discountPreview=0.0;walletEnabled=false;saveLocal();dialog.dismiss();if(api.userId!=null)refreshUserData()
             AlertDialog.Builder(this).setTitle("অর্ডার সফল হয়েছে").setMessage("আপনার অর্ডার গ্রহণ করা হয়েছে।\nঅর্ডার আইডি: ${orderId.take(18)}").setPositiveButton("আমার অর্ডার"){_,_->showOrders()}.setNegativeButton("ঠিক আছে",null).show()
         }catch(e:Exception){toast("অর্ডার করা যায়নি: ${e.message}")}
@@ -733,7 +906,85 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun cancelOrderPrompt(){val input=EditText(this).apply{hint="সম্পূর্ণ Order ID"};AlertDialog.Builder(this).setTitle("অর্ডার বাতিল").setMessage("শুধু Pending অর্ডার বাতিল করা যাবে").setView(input).setPositiveButton("বাতিল নিশ্চিত"){_,_->lifecycleScope.launch{runCatching{api.rpc("cancel_order_atomic",JSONObject().put("p_order_id",input.text.toString().trim()));toast("বাতিলের অনুরোধ সফল")} .onFailure{toast("বাতিল হয়নি: ${it.message}")}}}.setNegativeButton("ফিরে যান",null).show()}
-    private fun trackByPhone(){val input=EditText(this).apply{hint="01XXXXXXXXX";inputType=InputType.TYPE_CLASS_PHONE};AlertDialog.Builder(this).setTitle("অর্ডার ট্র্যাক করুন").setView(input).setPositiveButton("খুঁজুন"){_,_->lifecycleScope.launch{runCatching{val a=JSONArray(api.rpc("track_orders_by_phone",JSONObject().put("p_phone",input.text.toString())));val msg=(0 until a.length()).joinToString("\n\n"){i->val o=a.getJSONObject(i);"#${o.optString("id").take(8)} · ${o.optString("status")} · ৳${money(o.optDouble("total_amount"))}"};AlertDialog.Builder(this@MainActivity).setMessage(msg.ifBlank{"কোনো অর্ডার পাওয়া যায়নি"}).setPositiveButton("ঠিক আছে",null).show()}.onFailure{toast("ট্র্যাক করা যায়নি: ${it.message}")}}}.setNegativeButton("বাতিল",null).show()}
+    private fun trackByPhone() {
+        val input = EditText(this).apply {
+            hint = "01XXXXXXXXX"
+            inputType = InputType.TYPE_CLASS_PHONE
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("অর্ডার ট্র্যাক করুন")
+            .setMessage("অর্ডারের সময় ব্যবহৃত ১১ ডিজিটের মোবাইল নম্বর দিন")
+            .setView(input).setPositiveButton("খুঁজুন", null).setNegativeButton("বাতিল", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val phone = input.text.toString().filter { it.isDigit() }
+                if (!Regex("^01[3-9][0-9]{8}$").matches(phone)) {
+                    toast("সঠিক ১১ ডিজিটের নম্বর দিন")
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                lifecycleScope.launch {
+                    runCatching {
+                        val rows = JSONArray(api.rpc("track_orders_by_phone", JSONObject().put("p_phone", phone)))
+                        val content = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(14, 8, 14, 8)
+                        }
+                        if (rows.length() == 0) {
+                            content.addView(TextView(this@MainActivity).apply {
+                                text = "কোনো অর্ডার পাওয়া যায়নি"
+                                gravity = Gravity.CENTER
+                                setPadding(12, 24, 12, 24)
+                            })
+                        } else {
+                            for (i in 0 until rows.length()) {
+                                val order = rows.getJSONObject(i)
+                                val items = order.optJSONArray("items")
+                                val summary = if (items == null) "" else (0 until items.length()).joinToString(", ") { index ->
+                                    val item = items.optJSONObject(index) ?: JSONObject()
+                                    "${item.optString("title", "পণ্য")} × ${item.optInt("qty", 1)}"
+                                }
+                                val card = LinearLayout(this@MainActivity).apply {
+                                    orientation = LinearLayout.VERTICAL
+                                    setPadding(12, 10, 12, 10)
+                                    background = getDrawable(R.drawable.bg_card)
+                                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 10 }
+                                }
+                                card.addView(TextView(this@MainActivity).apply {
+                                    text = "#${order.optString("id").take(8)}  •  ${order.optString("status")}" 
+                                    setTextColor(getColor(R.color.text_main))
+                                    textSize = 14f
+                                })
+                                card.addView(TextView(this@MainActivity).apply {
+                                    text = "তারিখ: ${order.optString("created_at")}\nমোট: ৳${money(order.optDouble("total_amount"))}"
+                                    setTextColor(getColor(R.color.text_secondary))
+                                    textSize = 12f
+                                    setPadding(0, 5, 0, 5)
+                                })
+                                if (summary.isNotBlank()) card.addView(TextView(this@MainActivity).apply {
+                                    text = "আইটেম: $summary"
+                                    setTextColor(getColor(R.color.text_secondary))
+                                    textSize = 12f
+                                })
+                                val courier = order.optJSONObject("courier_info")
+                                val tracking = courier?.optString("trackingId").orEmpty()
+                                if (tracking.isNotBlank()) card.addView(TextView(this@MainActivity).apply {
+                                    text = "ট্র্যাকিং: ${courier?.optString("service").orEmpty()} - $tracking"
+                                    setTextColor(getColor(R.color.success))
+                                    setPadding(0, 6, 0, 0)
+                                })
+                                content.addView(card)
+                            }
+                        }
+                        AlertDialog.Builder(this@MainActivity).setTitle("অর্ডারের তথ্য")
+                            .setView(ScrollView(this@MainActivity).apply { addView(content) })
+                            .setPositiveButton("বন্ধ", null).show()
+                    }.onFailure { toast("অর্ডার খুঁজতে সমস্যা হয়েছে: ${it.message}") }
+                }
+            }
+        }
+        dialog.show()
+    }
+
 
     private fun showProfile(){
         if(api.userId==null){
@@ -750,15 +1001,77 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun profileActions(loggedIn:Boolean){
-        val items=if(loggedIn) arrayOf("আমার অর্ডার","অর্ডার ট্র্যাক করুন","রিটার্ন পলিসি","প্রাইভেসি পলিসি","আমাদের সম্পর্কে","ফেসবুক পেজ","ইউটিউব চ্যানেল","হটলাইন কল") else arrayOf("লগইন / রেজিস্ট্রেশন","অর্ডার ট্র্যাক করুন","রিটার্ন পলিসি","প্রাইভেসি পলিসি","আমাদের সম্পর্কে","ফেসবুক পেজ","ইউটিউব চ্যানেল","হটলাইন কল")
-        AlertDialog.Builder(this).setTitle("প্রোফাইল").setItems(items){_,which->when(which){0->if(loggedIn)showOrders() else showAuth();1->trackByPhone();2->showPolicy("policy_return","রিটার্ন পলিসি");3->showPolicy("policy_privacy","প্রাইভেসি পলিসি");4->showPolicy("policy_about","আমাদের সম্পর্কে");5->openExternal("https://www.facebook.com/profile.php?id=61596001466743");6->openExternal("https://www.youtube.com/@mm-bazaar");7->callHelpline()}}.show()
+        val items = mutableListOf<String>()
+        if (loggedIn) items.add("আমার অর্ডার") else {
+            items.add("লগইন / রেজিস্ট্রেশন")
+            items.add("আমার সমস্ত অর্ডার")
+        }
+        items.addAll(listOf("অর্ডার ট্র্যাক করুন","রিটার্ন পলিসি","প্রাইভেসি পলিসি","আমাদের সম্পর্কে","ফেসবুক পেজ","ইউটিউব চ্যানেল","হটলাইন কল"))
+        AlertDialog.Builder(this).setTitle("প্রোফাইল").setItems(items.toTypedArray()){_,which->
+            val selected = items[which]
+            when(selected){
+                "লগইন / রেজিস্ট্রেশন" -> showAuth()
+                "আমার অর্ডার", "আমার সমস্ত অর্ডার" -> showOrders()
+                "অর্ডার ট্র্যাক করুন" -> trackByPhone()
+                "রিটার্ন পলিসি" -> showPolicy("policy_return","রিটার্ন পলিসি")
+                "প্রাইভেসি পলিসি" -> showPolicy("policy_privacy","প্রাইভেসি পলিসি")
+                "আমাদের সম্পর্কে" -> showPolicy("policy_about","আমাদের সম্পর্কে")
+                "ফেসবুক পেজ" -> openExternal("https://www.facebook.com/profile.php?id=61596001466743")
+                "ইউটিউব চ্যানেল" -> openExternal("https://www.youtube.com/@mm-bazaar")
+                "হটলাইন কল" -> callHelpline()
+            }
+        }.show()
     }
     private fun openExternal(url:String){ runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure { toast("লিংক খোলা যায়নি") } }
     private fun callHelpline(){ val phone=settings.optString("phone","01937175424").filter{it.isDigit()}; runCatching { startActivity(Intent(Intent.ACTION_DIAL,Uri.parse("tel:$phone"))) }.onFailure { toast("ফোন অ্যাপ খোলা যায়নি") } }
     private fun showPolicy(key:String,title:String){ AlertDialog.Builder(this).setTitle(title).setMessage(settings.optString(key).ifBlank{"তথ্য পাওয়া যায়নি"}).setPositiveButton("বন্ধ",null).show() }
 
     private fun editProfile(){val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(20,8,20,0)};val name=EditText(this).apply{hint="নাম";setText(userData.optString("name"))};val phone=EditText(this).apply{hint="মোবাইল";inputType=InputType.TYPE_CLASS_PHONE;setText(userData.optString("phone"))};val address=EditText(this).apply{hint="ঠিকানা";minLines=2;setText(userData.optString("address"))};box.addView(name);box.addView(phone);box.addView(address);val d=AlertDialog.Builder(this).setTitle("প্রোফাইল আপডেট").setView(box).setPositiveButton("সংরক্ষণ",null).setNegativeButton("বাতিল",null).create();d.setOnShowListener{d.getButton(-1).setOnClickListener{val ph=phone.text.toString().filter{it.isDigit()};if(!Regex("^01[3-9][0-9]{8}$").matches(ph)){toast("সঠিক ১১ ডিজিটের ফোন দিন");return@setOnClickListener};lifecycleScope.launch{runCatching{api.update("users","id=eq.${api.userId}",JSONObject().put("name",name.text.toString().trim()).put("phone",ph).put("address",address.text.toString().trim()));userData.put("name",name.text.toString().trim()).put("phone",ph).put("address",address.text.toString().trim());d.dismiss();toast("প্রোফাইল আপডেট হয়েছে")}.onFailure{toast("আপডেট হয়নি: ${it.message}")}}}};d.show()}
-    private fun showAuth(){val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(20,8,20,0)};val name=EditText(this).apply{hint="নাম (নতুন অ্যাকাউন্ট)"};val phone=EditText(this).apply{hint="মোবাইল (নতুন অ্যাকাউন্ট)";inputType=InputType.TYPE_CLASS_PHONE};val email=EditText(this).apply{hint="ইমেইল";inputType=33};val pass=EditText(this).apply{hint="পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)";inputType=129};val forgot=TextView(this).apply{text="পাসওয়ার্ড ভুলে গেছেন?";setTextColor(getColor(R.color.gold_dark));setPadding(0,12,0,4);setOnClickListener{val e=email.text.toString().trim();if(e.isBlank())toast("আগে ইমেইল লিখুন")else lifecycleScope.launch{runCatching{api.resetPasswordForEmail(e);toast("পাসওয়ার্ড রিসেট লিংক পাঠানো হয়েছে")}.onFailure{toast(it.message?:"ব্যর্থ")}}}};box.addView(name);box.addView(phone);box.addView(email);box.addView(pass);box.addView(forgot);val d=AlertDialog.Builder(this).setTitle("লগইন / রেজিস্ট্রেশন").setView(box).setPositiveButton("লগইন",null).setNeutralButton("নতুন অ্যাকাউন্ট",null).setNegativeButton("বন্ধ",null).create();d.setOnShowListener{d.getButton(-1).setOnClickListener{doAuth(email.text.toString(),pass.text.toString(),name.text.toString(),phone.text.toString(),false,d)};d.getButton(-3).setOnClickListener{doAuth(email.text.toString(),pass.text.toString(),name.text.toString(),phone.text.toString(),true,d)}};d.show()}
+    private fun showAuth() {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20, 8, 20, 0)
+        }
+        var signupMode = false
+        val name = EditText(this).apply { hint = "নাম (নতুন অ্যাকাউন্ট)"; visibility = View.GONE }
+        val phone = EditText(this).apply { hint = "মোবাইল (নতুন অ্যাকাউন্ট)"; inputType = InputType.TYPE_CLASS_PHONE; visibility = View.GONE }
+        val email = EditText(this).apply { hint = "ইমেইল"; inputType = 33 }
+        val pass = EditText(this).apply { hint = "পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)"; inputType = 129 }
+        val forgot = TextView(this).apply {
+            text = "পাসওয়ার্ড ভুলে গেছেন?"
+            setTextColor(getColor(R.color.gold_dark))
+            setPadding(0, 12, 0, 4)
+            setOnClickListener {
+                val address = email.text.toString().trim()
+                if (address.isBlank()) toast("আগে ইমেইল লিখুন") else lifecycleScope.launch {
+                    runCatching { api.resetPasswordForEmail(address); toast("পাসওয়ার্ড রিসেট লিংক পাঠানো হয়েছে") }
+                        .onFailure { toast(it.message ?: "ব্যর্থ") }
+                }
+            }
+        }
+        box.addView(name); box.addView(phone); box.addView(email); box.addView(pass); box.addView(forgot)
+        val dialog = AlertDialog.Builder(this).setTitle("লগইন / রেজিস্ট্রেশন")
+            .setView(box).setPositiveButton("লগইন", null)
+            .setNeutralButton("নতুন অ্যাকাউন্ট খুলুন", null)
+            .setNegativeButton("বন্ধ", null).create()
+        dialog.setOnShowListener {
+            val submit = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            val switch = dialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+            fun updateMode() {
+                name.visibility = if (signupMode) View.VISIBLE else View.GONE
+                phone.visibility = if (signupMode) View.VISIBLE else View.GONE
+                forgot.visibility = if (signupMode) View.GONE else View.VISIBLE
+                submit.text = if (signupMode) "রেজিস্ট্রেশন করুন" else "লগইন করুন"
+                switch.text = if (signupMode) "লগইনে ফিরে যান" else "নতুন অ্যাকাউন্ট খুলুন"
+            }
+            submit.setOnClickListener {
+                doAuth(email.text.toString(), pass.text.toString(), name.text.toString(), phone.text.toString(), signupMode, dialog)
+            }
+            switch.setOnClickListener { signupMode = !signupMode; updateMode() }
+            updateMode()
+        }
+        dialog.show()
+    }
     private fun doAuth(email:String,password:String,name:String,phone:String,signup:Boolean,d:AlertDialog){lifecycleScope.launch{runCatching{if(signup){if(name.isBlank()||!Regex("^01[3-9][0-9]{8}$").matches(phone.filter{it.isDigit()}))throw IllegalArgumentException("নাম ও সঠিক ১১ ডিজিটের ফোন দিন");if(password.length<6)throw IllegalArgumentException("পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে");api.signUp(email.trim(),password,name.trim(),phone.filter{it.isDigit()})}else api.signIn(email.trim(),password);d.dismiss();refreshUserData();toast(if(signup)"অ্যাকাউন্ট তৈরি হয়েছে" else "লগইন সফল");showProfile()}.onFailure{toast(it.message?:"লগইন ব্যর্থ")}}}
     private fun openReview(p:JSONObject){
         if(api.userId==null){showAuth();return}
