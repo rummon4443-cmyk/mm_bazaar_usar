@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:layout_margin="5dp" android:padding="8dp" android:background="@drawable/bg_card">
+    <FrameLayout android:layout_width="match_parent" android:layout_height="145dp">
+        <ImageView android:id="@+id/ivProduct" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:contentDescription="পণ্যের ছবি"/>
+        <TextView android:id="@+id/tvWish" android:layout_width="32dp" android:layout_height="32dp" android:layout_gravity="top|end" android:gravity="center" android:text="♡" android:textSize="22sp" android:textColor="#D97706" android:background="#EEFFFFFF"/>
+    </FrameLayout>
+    <TextView android:id="@+id/tvBrand" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text_secondary" android:textSize="10sp" android:maxLines="1" android:paddingTop="3dp"/>
+    <TextView android:id="@+id/tvTitle" android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical" android:maxLines="2" android:ellipsize="end" android:text="পণ্যের নাম" android:textColor="@color/text_main" android:textSize="13sp" android:textStyle="bold"/>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:id="@+id/tvPrice" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="৳ ০" android:textColor="@color/gold_dark" android:textStyle="bold" android:textSize="15sp"/>
+        <TextView android:id="@+id/tvStock" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="স্টক" android:textColor="@color/success" android:textSize="10sp"/>
+    </LinearLayout>
+    <com.google.android.material.button.MaterialButton android:id="@+id/btnAdd" android:layout_width="match_parent" android:layout_height="38dp" android:layout_marginTop="7dp" android:text="কার্টে যোগ করুন" android:textSize="11sp" android:insetTop="0dp" android:insetBottom="0dp" app:cornerRadius="9dp"/>
+</LinearLayout>

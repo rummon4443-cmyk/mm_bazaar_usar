@@ -1,0 +1,5 @@
+<resources>
+    <color name="gold">#D97706</color><color name="gold_dark">#B45309</color><color name="ink">#0B1120</color>
+    <color name="surface">#FFFFFF</color><color name="surface_sub">#F4F7FB</color><color name="text_main">#0F172A</color>
+    <color name="text_secondary">#64748B</color><color name="success">#059669</color><color name="danger">#DC2626</color>
+</resources>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@color/surface_sub">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="58dp" android:gravity="center_vertical" android:paddingHorizontal="16dp" android:background="@color/ink">
+        <ImageView android:layout_width="38dp" android:layout_height="38dp" android:src="@drawable/mm_logo" android:scaleType="centerCrop" android:background="@drawable/bg_card" android:padding="2dp"/>
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="MM BAZAAR" android:textColor="#FFFFFF" android:textStyle="bold" android:textSize="19sp" android:paddingStart="10dp"/>
+        <TextView android:id="@+id/tvAccount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="আমার অ্যাকাউন্ট" android:textColor="#FFFFFF" android:textSize="12sp" android:padding="8dp"/>
+    </LinearLayout>
+    <EditText android:id="@+id/etSearch" android:layout_width="match_parent" android:layout_height="48dp" android:layout_margin="12dp" android:paddingHorizontal="14dp" android:hint="পণ্য খুঁজুন..." android:singleLine="true" android:background="@drawable/bg_card" android:drawableStart="@android:drawable/ic_menu_search" android:drawablePadding="10dp" android:inputType="text"/>
+    <TextView android:id="@+id/tvNotice" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="9dp" android:background="#FFF3D6" android:textColor="#8A4B08" android:text="MM BAZAAR — আপনার বিশ্বস্ত অনলাইন শপ" android:gravity="center" android:textSize="12sp"/>
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout android:id="@+id/swipeRefresh" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <ScrollView android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingBottom="12dp">
+                <FrameLayout android:layout_width="match_parent" android:layout_height="120dp" android:layout_margin="12dp"><ImageView android:id="@+id/ivBanner" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:background="@drawable/bg_gold_button"/><TextView android:id="@+id/tvBanner" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="MM BAZAAR" android:textColor="#FFFFFF" android:textStyle="bold" android:textSize="22sp"/></FrameLayout>
+                <LinearLayout android:id="@+id/flashSection" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="⚡ ফ্ল্যাশ সেল" android:textColor="@color/gold_dark" android:textStyle="bold" android:textSize="17sp" android:paddingHorizontal="14dp" android:paddingTop="8dp"/>
+                    <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvFlash" android:layout_width="match_parent" android:layout_height="wrap_content" android:nestedScrollingEnabled="false" android:paddingHorizontal="8dp" android:clipToPadding="false"/>
+                </LinearLayout>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ক্যাটাগরি" android:textColor="@color/text_main" android:textStyle="bold" android:textSize="17sp" android:paddingHorizontal="14dp" android:paddingTop="4dp"/>
+                <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvCategories" android:layout_width="match_parent" android:layout_height="76dp" android:paddingHorizontal="8dp" android:clipToPadding="false" android:overScrollMode="never"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:paddingHorizontal="14dp" android:paddingTop="10dp" android:paddingBottom="8dp">
+                    <TextView android:id="@+id/tvProductHeading" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="সকল পণ্য" android:textColor="@color/text_main" android:textStyle="bold" android:textSize="17sp"/>
+                    <TextView android:id="@+id/tvProductCount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="@color/text_secondary" android:textSize="12sp" android:paddingEnd="8dp"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnFilter" android:layout_width="wrap_content" android:layout_height="36dp" android:text="ফিল্টার" android:textSize="11sp" android:insetTop="0dp" android:insetBottom="0dp" app:cornerRadius="8dp"/>
+                </LinearLayout>
+                <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvProducts" android:layout_width="match_parent" android:layout_height="wrap_content" android:nestedScrollingEnabled="false" android:paddingHorizontal="8dp" android:clipToPadding="false"/>
+                <TextView android:id="@+id/tvEmpty" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="30dp" android:gravity="center" android:text="পণ্য পাওয়া যায়নি" android:visibility="gone" android:textColor="@color/text_secondary"/>
+            </LinearLayout>
+        </ScrollView>
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="62dp" android:orientation="horizontal" android:background="#FFFFFF" android:elevation="12dp" android:gravity="center">
+        <TextView android:id="@+id/navHome" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:text="⌂\nহোম" android:textColor="@color/gold" android:textStyle="bold" android:textSize="12sp"/>
+        <TextView android:id="@+id/navWishlist" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:text="♡\nপছন্দ" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+        <TextView android:id="@+id/navCart" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:text="🛒\nকার্ট" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+        <TextView android:id="@+id/navOrders" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:text="▤\nঅর্ডার" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+        <TextView android:id="@+id/navProfile" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:text="☻\nপ্রোফাইল" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+    </LinearLayout>
+</LinearLayout>
