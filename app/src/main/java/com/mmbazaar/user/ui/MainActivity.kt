@@ -48,10 +48,9 @@ class MainActivity : AppCompatActivity() {
     private data class CartLine(val product: JSONObject, var qty: Int, val size: String, val color: String)
     private val cart = linkedMapOf<String, CartLine>()
     private val wishlist = linkedSetOf<String>()
-    private var settings = defaultStoreSettings()
-    private var toggles = defaultFeatureToggles()
-    private var maintenanceDialog: AlertDialog? = null
-        private var categoryFilter = "all"
+    private var settings = JSONObject()
+    private var toggles = JSONObject()
+    private var categoryFilter = "all"
     private var minPrice = 0.0
     private var maxPrice = Double.MAX_VALUE
     private var onlyInStock = false
@@ -67,7 +66,6 @@ class MainActivity : AppCompatActivity() {
     private var discountPreview = 0.0
     private var bannerIndex = 0
     private var initialDeepLinkHandled = false
-    private var hasLoadedStore = false
     private val bannerSlideHandler = Handler(Looper.getMainLooper())
     private val bannerSlideRunnable = object : Runnable { override fun run() { if (banners.size > 1 && !isFinishing) { bannerIndex = (bannerIndex + 1) % banners.size; showCurrentBanner(); bannerSlideHandler.postDelayed(this, 4500L) } } }
     private var walletEnabled = false
@@ -85,46 +83,14 @@ class MainActivity : AppCompatActivity() {
     private val flashTicker = object : Runnable { override fun run() { updateFlashCountdown(); if (!isFinishing) flashHandler.postDelayed(this, 1000L) } }
     private val refreshFallback = object : Runnable { override fun run() { if (!isFinishing) { loadStore(); refreshHandler.postDelayed(this, 60_000L) } } }
 
-    /** Defaults intentionally mirror the keys and defaults in reference-html/index.html. */
-    private fun defaultStoreSettings() = JSONObject().apply {
-        put("store_name", "MM BAZAAR"); put("phone", "01937175424"); put("whatsapp", "01937175424")
-        put("marquee", "⚡ MM BAZAAR — আপনার বিশ্বস্ত অনলাইন শপ")
-        put("del_in", 60); put("del_out", 120); put("tax", 0); put("min_order", 0); put("free_delivery_threshold", 0)
-        put("bkash", "01937175424"); put("nagad", "01937175424")
-        put("bkash_on", true); put("nagad_on", true); put("cod_on", true); put("maintenance", false)
-        put("offer1_icon", "🚚"); put("offer1_title", "ফ্রি ডেলিভারি"); put("offer1_sub", "৳১০০০+ অর্ডারে")
-        put("offer2_icon", "🎁"); put("offer2_title", "১০% ছাড়"); put("offer2_sub", "প্রথম অর্ডারে")
-        put("offer3_icon", "⚡"); put("offer3_title", "ফ্ল্যাশ সেল"); put("offer3_sub", "বিশেষ অফার")
-        put("policy_return", ""); put("policy_privacy", ""); put("policy_about", "")
-        // Extra Admin model fields are retained when present; these are server/admin-side controls.
-        put("loyalty_rate", 1.0); put("referral_bonus", 0.0)
-        put("auto_welcome_message", "আসসালামু আলাইকুম! MM BAZAAR-এ আপনাকে স্বাগতম.")
-        put("auto_welcome_enabled", true); put("sms_notify", true); put("abandoned_cart", false)
-        put("otp_on", false); put("sms_api", ""); put("courier_api", "")
-        put("seo_title", ""); put("seo_desc", ""); put("pwa_name", "MM BAZAAR")
-    }
-    private fun defaultFeatureToggles() = JSONObject().apply {
-        put("f_p_brand", true); put("f_p_size", true); put("f_p_color", true); put("f_p_oldprice", true)
-        put("f_s_flash_sale", true); put("f_s_wishlist", true); put("f_s_hide_out_stock", false)
-        put("f_s_banners", true); put("f_s_marquee_notice", true); put("f_s_guest_checkout", true); put("f_s_wa_checkout", true)
-    }
-    private fun mergeJson(defaults: JSONObject, remote: JSONObject?): JSONObject {
-        val merged = JSONObject(defaults.toString())
-        if (remote != null) {
-            val keys = remote.keys()
-            while (keys.hasNext()) { val key = keys.next(); merged.put(key, remote.get(key)) }
-        }
-        return merged
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         val dark = getSharedPreferences("mmb_user_local", MODE_PRIVATE).getBoolean("dark_mode", false); AppCompatDelegate.setDefaultNightMode(if (dark) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO)
         super.onCreate(savedInstanceState)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         api = Supabase(this); restoreLocal(); createChatNotificationChannel(); requestNotificationPermissionIfNeeded()
-        productAdapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) }, { toggles.optBoolean("f_s_wishlist", true) })
+        productAdapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) })
         categoryAdapter = CategoryAdapter(mutableListOf(), ::filterCategory)
-        flashAdapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) }, { toggles.optBoolean("f_s_wishlist", true) })
+        flashAdapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) })
         b.rvFlash.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false); b.rvFlash.adapter = flashAdapter
         b.rvProducts.layoutManager = GridLayoutManager(this, 2); b.rvProducts.adapter = productAdapter
         b.rvCategories.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false); b.rvCategories.adapter = categoryAdapter
@@ -161,7 +127,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); initialDeepLinkHandled=true; handleDeepLink(intent); if(intent.getBooleanExtra("open_chat",false)) b.root.post { openChat() } }
-    override fun onResume() { super.onResume(); startRealtime(); if (hasLoadedStore) loadStore(); refreshHandler.removeCallbacks(refreshFallback); refreshHandler.postDelayed(refreshFallback, 60_000L); flashHandler.removeCallbacks(flashTicker); flashHandler.post(flashTicker); chatPollHandler.removeCallbacks(chatPollRunnable); chatPollHandler.post(chatPollRunnable); refreshChatUnread(false) }
+    override fun onResume() { super.onResume(); startRealtime(); refreshHandler.removeCallbacks(refreshFallback); refreshHandler.postDelayed(refreshFallback, 60_000L); flashHandler.removeCallbacks(flashTicker); flashHandler.post(flashTicker); chatPollHandler.removeCallbacks(chatPollRunnable); chatPollHandler.post(chatPollRunnable); refreshChatUnread(false) }
     override fun onPause() { refreshHandler.removeCallbacks(refreshFallback); chatPollHandler.removeCallbacks(chatPollRunnable); bannerSlideHandler.removeCallbacks(bannerSlideRunnable); flashHandler.removeCallbacks(flashTicker); activeRealtime?.close(); activeRealtime = null; super.onPause() }
 
     private fun restoreLocal() {
@@ -182,76 +148,28 @@ class MainActivity : AppCompatActivity() {
         b.swipeRefresh.isRefreshing = true
         try {
             val s = api.select("settings", "select=*")
-            var remoteConfig: JSONObject? = null
-            var remoteToggles: JSONObject? = null
-            for (i in 0 until s.length()) {
-                val row = s.getJSONObject(i)
-                when (row.optString("id")) {
-                    "global_config" -> remoteConfig = row.optJSONObject("data")
-                    "feature_toggles" -> remoteToggles = row.optJSONObject("data")
-                }
-            }
-            settings = mergeJson(defaultStoreSettings(), remoteConfig)
-            toggles = mergeJson(defaultFeatureToggles(), remoteToggles)
+            for (i in 0 until s.length()) { val row=s.getJSONObject(i); when(row.optString("id")) { "global_config" -> settings=row.optJSONObject("data") ?: JSONObject(); "feature_toggles" -> toggles=row.optJSONObject("data") ?: JSONObject() } }
             val c=api.select("categories", "select=*&order=sort_order.asc"); categories.clear(); for(i in 0 until c.length()) if(c.getJSONObject(i).optBoolean("is_active",true)) categories.add(c.getJSONObject(i)); categoryAdapter.replace(categories)
             val ba=api.select("banners", "select=*&order=sort_order.asc"); banners.clear(); for(i in 0 until ba.length()) if(ba.getJSONObject(i).optBoolean("is_active",true)) banners.add(ba.getJSONObject(i))
             val p=api.select("products", "select=*&order=created_at.desc&limit=600"); products.clear(); for(i in 0 until p.length()) { val x=p.getJSONObject(i); if(x.optBoolean("is_active",true) && (!toggles.optBoolean("f_s_hide_out_stock",false) || availableStock(x, "", "")>0)) products.add(x) }
             val flash = products.filter { p -> p.optBoolean("is_flash_sale", false) && (p.optString("flash_ends_at").isBlank() || p.optString("flash_ends_at").take(19) > SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss",Locale.US).format(Date())) }
-            val flashOn = toggles.optBoolean("f_s_flash_sale", true)
-            b.flashSection.visibility = if (flash.isNotEmpty() && flashOn) View.VISIBLE else View.GONE
-            flashAdapter.replace(if (flashOn) flash else emptyList())
+            b.flashSection.visibility = if (flash.isNotEmpty() && toggles.optBoolean("f_s_flash_sale", true)) View.VISIBLE else View.GONE
+            flashAdapter.replace(flash)
             updateFlashCountdown()
-
-            val noticeOn = toggles.optBoolean("f_s_marquee_notice", true) && settings.optString("marquee").isNotBlank()
-            b.tvNotice.visibility = if (noticeOn) View.VISIBLE else View.GONE
-            b.tvNotice.text = settings.optString("marquee", "MM BAZAAR — আপনার বিশ্বস্ত অনলাইন শপ")
-
-            val wishOn = toggles.optBoolean("f_s_wishlist", true)
-            b.navWishlist.visibility = if (wishOn) View.VISIBLE else View.GONE
-            if (!wishOn && b.tvProductHeading.text.toString().contains("পছন্দ")) { categoryFilter = "all"; b.tvProductHeading.text = "সকল পণ্য" }
+            b.tvNotice.visibility=if(toggles.optBoolean("f_s_marquee_notice",true)) View.VISIBLE else View.GONE
+            b.tvNotice.text=if(settings.optBoolean("maintenance",false)) "দোকানটি সাময়িক রক্ষণাবেক্ষণে আছে" else settings.optString("marquee", "MM BAZAAR — আপনার বিশ্বস্ত অনলাইন শপ")
             renderOffers()
             renderRecentlyViewed()
-
-            val bannersOn = toggles.optBoolean("f_s_banners", true)
-            val bannerFrame = b.ivBanner.parent as? View
-            bannerFrame?.visibility = if (bannersOn) View.VISIBLE else View.GONE
-            b.ivBanner.visibility = if (bannersOn && banners.isNotEmpty()) View.VISIBLE else View.GONE
-            b.tvBanner.visibility = if (bannersOn) View.VISIBLE else View.GONE
-            b.tvBanner.text = banners.firstOrNull()?.optString("title")?.ifBlank { settings.optString("store_name", "MM BAZAAR") } ?: if (bannersOn) "স্বাগতম ${settings.optString("store_name", "MM BAZAAR")}-এ" else settings.optString("store_name", "MM BAZAAR")
-            if (bannersOn && banners.isNotEmpty()) {
-                bannerIndex = bannerIndex.coerceIn(0, banners.lastIndex)
-                showCurrentBanner()
-                bannerSlideHandler.removeCallbacks(bannerSlideRunnable)
-                if (banners.size > 1) bannerSlideHandler.postDelayed(bannerSlideRunnable, 4500L)
-                b.ivBanner.setOnClickListener { banners.getOrNull(bannerIndex)?.optString("link_url")?.takeIf { it.startsWith("http") }?.let { url -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
-            } else {
-                bannerSlideHandler.removeCallbacks(bannerSlideRunnable)
-                b.ivBanner.setOnClickListener(null)
-            }
-            productAdapter.notifyDataSetChanged()
-            flashAdapter.notifyDataSetChanged()
-            applyMaintenanceMode()
+            val bannersOn=toggles.optBoolean("f_s_banners",true) && banners.isNotEmpty()
+            b.ivBanner.visibility=if(bannersOn) View.VISIBLE else View.GONE
+            b.tvBanner.visibility=if(bannersOn) View.VISIBLE else View.GONE
+            b.tvBanner.text=banners.firstOrNull()?.optString("title")?.ifBlank { settings.optString("store_name","MM BAZAAR") } ?: settings.optString("store_name","MM BAZAAR")
+            if(bannersOn) { bannerIndex = 0; showCurrentBanner(); bannerSlideHandler.removeCallbacks(bannerSlideRunnable); bannerSlideHandler.postDelayed(bannerSlideRunnable, 4500L); b.ivBanner.setOnClickListener { banners.getOrNull(bannerIndex)?.optString("link_url")?.takeIf { it.startsWith("http") }?.let { url -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } } } else { bannerSlideHandler.removeCallbacks(bannerSlideRunnable) }
             if(api.userId!=null) refreshUserData()
             applyFilter()
             if (!initialDeepLinkHandled) { initialDeepLinkHandled = true; handleDeepLink(intent) }
-        } catch(e:Exception) { toast("ডেটা লোড হয়নি: ${e.message}") } finally { hasLoadedStore = true; b.swipeRefresh.isRefreshing=false }
+        } catch(e:Exception) { toast("ডেটা লোড হয়নি: ${e.message}") } finally { b.swipeRefresh.isRefreshing=false }
     } }
-
-    /** The web app blocks the storefront while maintenance=true; mirror that behavior natively. */
-    private fun applyMaintenanceMode() {
-        if (settings.optBoolean("maintenance", false)) {
-            if (maintenanceDialog?.isShowing == true) return
-            maintenanceDialog = AlertDialog.Builder(this)
-                .setTitle(settings.optString("store_name", "MM BAZAAR"))
-                .setMessage("দোকানটি সাময়িক রক্ষণাবেক্ষণে আছে।\nশীঘ্রই আবার ফিরে আসুন।")
-                .setCancelable(false)
-                .setPositiveButton("আবার চেষ্টা করুন") { _, _ -> loadStore() }
-                .create().also { it.show() }
-        } else {
-            maintenanceDialog?.dismiss()
-            maintenanceDialog = null
-        }
-    }
 
     private fun startRealtime() {
         activeRealtime?.close()
@@ -340,7 +258,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyFilter() {
         val q=b.etSearch.text?.toString()?.trim()?.lowercase().orEmpty()
-        val list=products.filter { p -> val cat=categories.firstOrNull { it.optString("id")==p.optString("category_id") }?.optString("name").orEmpty(); val price=p.optDouble("price"); (categoryFilter=="all" || p.optString("category_id")==categoryFilter) && (q.isBlank() || listOf(p.optString("title"),p.optString("brand"),p.optString("description"),cat).any{it.lowercase().contains(q)}) && price>=minPrice && price<=maxPrice && (!onlyInStock || availableStock(p,"","")>0) && (!toggles.optBoolean("f_s_hide_out_stock", false) || availableStock(p,"","")>0) }.toMutableList()
+        val list=products.filter { p -> val cat=categories.firstOrNull { it.optString("id")==p.optString("category_id") }?.optString("name").orEmpty(); val price=p.optDouble("price"); (categoryFilter=="all" || p.optString("category_id")==categoryFilter) && (q.isBlank() || listOf(p.optString("title"),p.optString("brand"),p.optString("description"),cat).any{it.lowercase().contains(q)}) && price>=minPrice && price<=maxPrice && (!onlyInStock || availableStock(p,"","")>0) }.toMutableList()
         when(sortMode){"price_asc"->list.sortBy{it.optDouble("price")};"price_desc"->list.sortByDescending{it.optDouble("price")};else->list.sortByDescending{it.optString("created_at")}}
         productAdapter.replace(list); b.tvProductCount.text="${list.size} টি পণ্য"; b.tvEmpty.visibility=if(list.isEmpty()) View.VISIBLE else View.GONE
     }
@@ -365,9 +283,9 @@ class MainActivity : AppCompatActivity() {
         box.addView(label("ক্যাটাগরি নির্বাচন করুন")); box.addView(selector)
         val count = TextView(this).apply { setPadding(0,12,0,4); setTextColor(getColor(R.color.text_secondary)) }
         val list = RecyclerView(this).apply { layoutManager = LinearLayoutManager(this@MainActivity); isNestedScrollingEnabled = false }
-        val adapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) }, { toggles.optBoolean("f_s_wishlist", true) })
+        val adapter = ProductAdapter(mutableListOf(), { wishlist.contains(it) }, ::showProduct, ::quickAdd, ::toggleWish, { toggles.optBoolean("f_p_brand", true) }, { toggles.optBoolean("f_p_oldprice", true) })
         list.adapter = adapter
-        fun refresh() { val id = if (selector.selectedItemPosition == 0) "all" else categories[selector.selectedItemPosition - 1].optString("id"); val rows = products.filter { (id == "all" || it.optString("category_id") == id) && (!toggles.optBoolean("f_s_hide_out_stock", false) || availableStock(it, "", "") > 0) }; adapter.replace(rows); count.text = "${rows.size} টি পণ্য" }
+        fun refresh() { val id = if (selector.selectedItemPosition == 0) "all" else categories[selector.selectedItemPosition - 1].optString("id"); val rows = products.filter { id == "all" || it.optString("category_id") == id }; adapter.replace(rows); count.text = "${rows.size} টি পণ্য" }
         selector.onItemSelectedListener = spinnerListener { refresh() }
         box.addView(count); box.addView(list, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * .52f).toInt()))
         AlertDialog.Builder(this).setTitle("ক্যাটালগ / ক্যাটাগরি").setView(ScrollView(this).apply { addView(box) }).setPositiveButton("দেখুন") { _, _ -> categoryFilter = if (selector.selectedItemPosition == 0) "all" else categories[selector.selectedItemPosition - 1].optString("id"); b.tvProductHeading.text = if(categoryFilter == "all") "সকল পণ্য" else categories.firstOrNull{it.optString("id")==categoryFilter}?.optString("name") ?: "পণ্য"; applyFilter() }.setNegativeButton("বন্ধ", null).create().also { dialog -> dialog.setOnShowListener { dialog.window?.setLayout(-1, -1) }; dialog.show() }
@@ -379,7 +297,6 @@ class MainActivity : AppCompatActivity() {
         return total
     }
     private fun addLine(p:JSONObject,size:String,color:String,qty:Int=1) {
-        if (settings.optBoolean("maintenance", false)) { toast("দোকানটি সাময়িক রক্ষণাবেক্ষণে আছে"); return }
         val left=availableStock(p,size,color); val key=cartKey(p.optString("id"),size,color); val old=cart[key]?.qty ?: 0
         if(left<=old) { toast("এই ভ্যারিয়েন্টের পর্যাপ্ত স্টক নেই"); return }
         val line=cart[key]; if(line==null) cart[key]=CartLine(p,qty,size,color) else line.qty=(line.qty+qty).coerceAtMost(left)
@@ -405,9 +322,7 @@ class MainActivity : AppCompatActivity() {
         val title=TextView(this).apply { text=p.optString("title"); textSize=19f; setTextColor(getColor(R.color.text_main)); setPadding(0,10,0,4) }
         val price=TextView(this).apply { text="৳ ${money(p.optDouble("price"))}"; textSize=20f; setTextColor(getColor(R.color.gold_dark)) }
         val desc=TextView(this).apply { text=p.optString("description","বিবরণ নেই"); textSize=14f; setTextColor(getColor(R.color.text_secondary)); setPadding(0,8,0,8) }
-        box.addView(image); if (galleryUrls.size > 1) box.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(galleryStrip) }); box.addView(title)
-        if (toggles.optBoolean("f_p_brand", true) && p.optString("brand").isNotBlank()) box.addView(TextView(this).apply { text = p.optString("brand"); textSize = 12f; setTextColor(getColor(R.color.text_secondary)); setPadding(0, 0, 0, 6) })
-        box.addView(price)
+        box.addView(image); if (galleryUrls.size > 1) box.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(galleryStrip) }); box.addView(title); box.addView(price)
         val share = Button(this).apply { text = "পণ্য শেয়ার করুন"; setOnClickListener { shareProduct(p) } }; box.addView(share)
         val sizes=stringArray(p.optJSONArray("sizes")); val colors=stringArray(p.optJSONArray("colors"))
         val sizeSpin=Spinner(this); val colorSpin=Spinner(this)
@@ -500,7 +415,6 @@ class MainActivity : AppCompatActivity() {
     private fun totals():Triple<Double,Double,Double> { val sub=subtotal(); val discount=if(appliedCoupon.isBlank())0.0 else discountPreview; val after=(sub-discount).coerceAtLeast(0.0); val free=settings.optDouble("free_delivery_threshold",0.0)>0&&after>=settings.optDouble("free_delivery_threshold",0.0); val delivery=if(free)0.0 else settings.optDouble(if(currentZone=="in")"del_in" else "del_out",if(currentZone=="in")60.0 else 120.0); val tax=(after*settings.optDouble("tax",0.0)/100.0).roundToInt().toDouble(); return Triple(delivery,tax,after+delivery+tax) }
 
     private fun showCheckout() {
-        if (settings.optBoolean("maintenance", false)) { toast("দোকানটি সাময়িক রক্ষণাবেক্ষণে আছে"); return }
         if(cart.isEmpty())return
         if(!toggles.optBoolean("f_s_guest_checkout",true)&&api.userId==null){showAuth();return}
         val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(20,8,20,4)}
@@ -509,11 +423,7 @@ class MainActivity : AppCompatActivity() {
         val applyCouponButton=Button(this).apply{text="কুপন প্রয়োগ করুন"};form.addView(applyCouponButton)
         if(api.userId!=null){name.setText(userData.optString("name"));phone.setText(userData.optString("phone"));address.setText(userData.optString("address"))}
         val zone=Spinner(this);zone.adapter=spinnerAdapter(listOf("ঢাকার ভিতরে","ঢাকার বাইরে"));form.addView(label("ডেলিভারি এলাকা"));form.addView(zone)
-        val payMethods = mutableListOf<Pair<String,String>>()
-        if (settings.optBoolean("cod_on", true)) payMethods.add("cod" to "ক্যাশ অন ডেলিভারি")
-        if (settings.optBoolean("bkash_on", true)) payMethods.add("bkash" to "বিকাশ")
-        if (settings.optBoolean("nagad_on", true)) payMethods.add("nagad" to "নগদ")
-        if (payMethods.isEmpty()) { toast("Admin থেকে সব পেমেন্ট পদ্ধতি বন্ধ রাখা হয়েছে"); return }
+        val payMethods=mutableListOf<Pair<String,String>>();if(settings.optBoolean("cod_on",true))payMethods.add("cod" to "ক্যাশ অন ডেলিভারি");if(settings.optBoolean("bkash_on",true))payMethods.add("bkash" to "বিকাশ");if(settings.optBoolean("nagad_on",true))payMethods.add("nagad" to "নগদ");if(payMethods.isEmpty())payMethods.add("cod" to "ক্যাশ অন ডেলিভারি")
         val pay=Spinner(this);pay.adapter=spinnerAdapter(payMethods.map{it.second});form.addView(label("পেমেন্ট পদ্ধতি"));form.addView(pay)
         val trx=field("বিকাশ/নগদ TrxID (অনলাইন পেমেন্টে)")
         val wallet=CheckBox(this).apply{text="ওয়ালেট ব্যবহার করুন (৳${money(userData.optDouble("wallet_balance"))})";isEnabled=api.userId!=null&&userData.optDouble("wallet_balance")>0};form.addView(wallet)
