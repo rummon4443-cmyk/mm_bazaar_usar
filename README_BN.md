@@ -19,3 +19,18 @@ GitHub Actions workflow `.github/workflows/build_apk.yml` দিয়েও Debug 
 - Existing RPC usage: `place_order_atomic`, `cancel_order_atomic`, `track_orders_by_phone`, `submit_review_atomic`, etc.
 
 কোনো service-role key এই অ্যাপে রাখা হয়নি।
+
+
+## পরবর্তী সংশোধন (Build সফল হওয়ার পর)
+
+এই আপডেটে:
+- `global_config` এবং `feature_toggles`-এর reference defaults-এর সঙ্গে remote JSON merge করা হয়েছে; Admin-এর partial settings পাঠালেও default key হারাবে না।
+- Maintenance Mode-এ নতুন Cart Add, Checkout, Order এবং WhatsApp Checkout বন্ধ করা হয়েছে।
+- Admin সব payment method বন্ধ করলে COD-কে জোর করে চালু করা হয় না; checkout বন্ধ থাকে।
+- bKash/Nagad চালু থাকলেও নম্বর ফাঁকা থাকলে সেই method দেখানো হয় না এবং order submit-এ পুনরায় যাচাই হয়।
+- Wishlist toggle বন্ধ থাকলে bottom navigation ও wishlist page access বন্ধ।
+- Chat header badge, unread state mark-as-read, foreground notification channel এবং Realtime subscription-এ `chats`, `chat_messages`, `reviews` যুক্ত।
+- Phoenix heartbeat ও reconnect backoff যোগ করা হয়েছে।
+- Chat message timestamp UTC-তে তৈরি হয়।
+
+**সীমাবদ্ধতা:** Background/terminated app push notification এখনো FCM + Firebase configuration + server-side sender ছাড়া সম্ভব নয়। Supabase RLS/Realtime publication এবং বাস্তব Admin setting পরিবর্তন করে end-to-end test করতে হবে। এই পরিবেশে Android SDK নেই, তাই এই নতুন আপডেটের APK build এখানে চালানো হয়নি।
